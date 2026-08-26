@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { onMounted, onUnmounted, computed } from "vue";
-import { NTag } from "naive-ui";
+import { NTag, NMessageProvider } from "naive-ui";
 import { useConnection } from "./stores/connection";
 
 const conn = useConnection();
@@ -18,38 +18,42 @@ const stateType = computed(() => {
 
 const nav = [
   { to: "/", label: "仪表盘" },
-  { to: "/m2", label: "内容管理（M2）", disabled: true },
+  { to: "/pages", label: "页面库" },
+  { to: "/facts", label: "记忆库（M2）", disabled: true },
+  { to: "/capture", label: "快速记事（M2）", disabled: true },
   { to: "/m3", label: "图谱 · 时间线 · 回收站（M3）", disabled: true },
   { to: "/m4", label: "运维 · 维护（M4）", disabled: true },
 ];
 </script>
 
 <template>
-  <div class="shell">
-    <aside class="sider">
-      <h1 class="logo">gbrain 面板</h1>
-      <nav>
-        <template v-for="item in nav" :key="item.to">
-          <RouterLink v-if="!item.disabled" :to="item.to" class="nav-item">{{ item.label }}</RouterLink>
-          <span v-else class="nav-item disabled">{{ item.label }}</span>
-        </template>
-      </nav>
-    </aside>
-    <main class="main">
-      <header class="topbar">
-        <NTag :type="stateType" size="small">
-          gbrain: {{ conn.status?.state ?? "…" }} :{{ conn.status?.effectivePort ?? "?" }}
-        </NTag>
-      </header>
-      <RouterView />
-      <div v-if="!conn.online" class="overlay">
-        <div class="overlay-card">
-          <h2>面板服务不可达</h2>
-          <p>后端可能已退出。请重新启动面板（bun run dev:server 或 bun run server/src/index.ts）。</p>
+  <n-message-provider>
+    <div class="shell">
+      <aside class="sider">
+        <h1 class="logo">gbrain 面板</h1>
+        <nav>
+          <template v-for="item in nav" :key="item.to">
+            <RouterLink v-if="!item.disabled" :to="item.to" class="nav-item">{{ item.label }}</RouterLink>
+            <span v-else class="nav-item disabled">{{ item.label }}</span>
+          </template>
+        </nav>
+      </aside>
+      <main class="main">
+        <header class="topbar">
+          <NTag :type="stateType" size="small">
+            gbrain: {{ conn.status?.state ?? "…" }} :{{ conn.status?.effectivePort ?? "?" }}
+          </NTag>
+        </header>
+        <RouterView />
+        <div v-if="!conn.online" class="overlay">
+          <div class="overlay-card">
+            <h2>面板服务不可达</h2>
+            <p>后端可能已退出。请重新启动面板（bun run dev:server 或 bun run server/src/index.ts）。</p>
+          </div>
         </div>
-      </div>
-    </main>
-  </div>
+      </main>
+    </div>
+  </n-message-provider>
 </template>
 
 <style scoped>
