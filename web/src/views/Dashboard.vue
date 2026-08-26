@@ -5,14 +5,17 @@ import { api } from "../api/client";
 
 const stats = ref<Record<string, unknown> | null>(null);
 const health = ref<Record<string, unknown> | null>(null);
+const fullStats = ref<Record<string, unknown> | null>(null);
 const error = ref<string | null>(null);
 
 onMounted(async () => {
   try {
-    [stats.value, health.value] = await Promise.all([
+    const [s, h, f] = await Promise.all([
       api<Record<string, unknown>>("/stats"),
       api<Record<string, unknown>>("/health-indicators"),
+      api<Record<string, unknown>>("/full-stats").catch(() => null),
     ]);
+    stats.value = s; health.value = h; fullStats.value = f;
   } catch (e) { error.value = String(e); }
 });
 
@@ -21,6 +24,11 @@ const numericEntries = computed(() =>
   Object.entries(stats.value ?? {}).filter((e): e is [string, number] => typeof e[1] === "number"));
 const otherEntries = computed(() =>
   Object.entries(stats.value ?? {}).filter(([, v]) => typeof v !== "number"));
+
+const fullNumeric = computed(() =>
+  Object.entries(fullStats.value ?? {}).filter((e): e is [string, number] => typeof e[1] === "number"));
+const fullOther = computed(() =>
+  Object.entries(fullStats.value ?? {}).filter(([, v]) => typeof v !== "number"));
 </script>
 
 <template>
@@ -35,6 +43,15 @@ const otherEntries = computed(() =>
     <NCard v-if="otherEntries.length" title="统计（其他字段）" size="small">
       <pre>{{ JSON.stringify(Object.fromEntries(otherEntries), null, 2) }}</pre>
     </NCard>
+    <NCard title="内容统计（full-stats）" size="small" style="margin-top: 12px">
+      <NGrid v-if="fullNumeric.length" :cols="4" :x-gap="12" :y-gap="12">
+        <NGi v-for="[k, v] in fullNumeric" :key="k">
+          <NStatistic :label="k" :value="v" />
+        </NGi>
+      </NGrid>
+      <pre v-if="fullOther.length">{{ JSON.stringify(Object.fromEntries(fullOther), null, 2) }}</pre>
+      <p v-if="!fullStats" class="muted">full-stats 不可用（502 时隐藏）</p>
+    </NCard>
     <NCard title="健康指标" size="small">
       <pre>{{ health ? JSON.stringify(health, null, 2) : "…" }}</pre>
     </NCard>
@@ -44,4 +61,5 @@ const otherEntries = computed(() =>
 <style scoped>
 .page { padding: 20px; }
 .error { color: #d03050; }
+.muted { color: #888; font-size: 12px; }
 </style>
