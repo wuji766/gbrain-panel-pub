@@ -1,0 +1,10 @@
+{
+  "name": "gbrain-panel",
+  "private": true,
+  "workspaces": ["server", "web"],
+  "scripts": {
+    "dev:server": "bun run server/src/index.ts",
+    "test": "bun test server/",
+    "discover": "bun run server/scripts/discover.ts"
+  }
+}

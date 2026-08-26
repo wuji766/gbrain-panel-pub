@@ -1,1 +1,6 @@
-.superpowers/  
+node_modules/
+web/dist/
+config.json
+server/test/.tmp/
+*.log
+.superpowers/
