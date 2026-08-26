@@ -1,7 +1,6 @@
 <!-- web/src/components/MarkdownView.vue -->
 <script setup lang="ts">
 import { computed } from "vue";
-// @ts-expect-error markdown-it@14 未提供类型声明，仓库亦未安装 @types/markdown-it（偏离简报逐字代码的最小修复，详见 m2-task-5-report.md）
 import MarkdownIt from "markdown-it";
 
 const props = defineProps<{ source: string }>();
