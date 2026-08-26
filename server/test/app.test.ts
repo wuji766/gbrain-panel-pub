@@ -58,3 +58,13 @@ describe("panel API（attached 模式）", () => {
     expect(json.present).toBe(false);
   });
 });
+
+describe("静态托管路径穿越防护", () => {
+  test("GET /..%5C..%5Cpackage.json（Windows %5C 向量）必须 404，不得读出 dist 外文件", async () => {
+    const { panelPort } = await bootPanelWithFake("healthy");
+    const res = await fetch(`http://127.0.0.1:${panelPort}/..%5C..%5Cpackage.json`);
+    expect(res.status).toBe(404);
+    const body = await res.text();
+    expect(body.includes("gbrain-panel")).toBe(false); // 不得泄露仓库根 package.json 内容
+  });
+});
