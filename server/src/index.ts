@@ -11,7 +11,9 @@ const orch = new Orchestrator(cfg);
 
 // 先注册退出处理，再启动 serve：启动窗口期（最长 30s 健康等待）的 Ctrl+C 也必须走 killServe，
 // 否则会留下持锁孤儿 serve，阻塞 ZCode 的 gbrain MCP。server 用可变引用，shutdown 内判空。
-// once 守卫：重复信号（连按 Ctrl+C）只触发一次完整退出流程；SIGBREAK 覆盖 Windows 控制台的关闭事件。
+// 必须用 on 而非 once：once 会在首个信号后移除监听器，退出窗口期（killServe/taskkill 耗时）内
+// 第二次 Ctrl+C 将无监听器、走默认强杀，绕过 killServe 造成孤儿 serve。改 on 后重复信号由
+// shuttingDown 守卫防重入（它就是干这个的）；SIGBREAK 覆盖 Windows 控制台的关闭事件。
 let server: ReturnType<typeof Bun.serve> | undefined;
 let shuttingDown = false;
 const shutdown = async () => {
@@ -21,9 +23,9 @@ const shutdown = async () => {
   try { await orch.killServe(); } catch (e) { console.error("[panel] killServe 异常:", e); }
   finally { server?.stop(); process.exit(0); }
 };
-process.once("SIGINT", shutdown);
-process.once("SIGTERM", shutdown);
-process.once("SIGBREAK", shutdown);
+process.on("SIGINT", shutdown);
+process.on("SIGTERM", shutdown);
+process.on("SIGBREAK", shutdown);
 
 const state = await orch.start();
 console.log(`[panel] gbrain 状态: ${state} (port ${orch.getEffectivePort()})`);

@@ -137,9 +137,9 @@ export class Orchestrator {
 
   async killServe(): Promise<void> {
     if (!this.proc) { this.setState("stopped"); return; } // attached/foreign：绝不杀别人的进程
-    // 死 PID 守卫：子进程已自行退出（exitCode 非 null）时直接收尾，
-    // 避免对已退出 PID 发 taskkill（该 PID 可能已被系统复用，误杀无关进程）。
-    if (this.proc.exitCode !== null) {
+    // 死 PID 守卫：子进程已自行退出（exitCode 非 null，或被信号杀死时 exitCode 保持 null 而
+    // signalCode 非 null）时直接收尾，避免对已退出 PID 发 taskkill（该 PID 可能已被系统复用，误杀无关进程）。
+    if (this.proc.exitCode !== null || this.proc.signalCode !== null) {
       this.log(`serve 已自行退出（code=${this.proc.exitCode}），无需 taskkill`);
       this.proc = null;
       this.setState("stopped");

@@ -103,6 +103,24 @@ describe("killServe", () => {
     expect(orch.getState()).toBe("stopped");
     expect(orch.getRecentLogs().join("\n")).toMatch(/无需 taskkill/);
   });
+
+  test("子进程被信号杀死（signalCode 非空、exitCode 为 null）时 killServe 跳过 taskkill", async () => {
+    const port = await getFreePort();
+    const orch = makeOrch(port);
+    await orch.start(); // → own
+    // Windows 实测：子进程被外部 taskkill 或自行退出时父进程视角只有 exitCode 非 null、
+    // signalCode 恒为 null；唯一能让 signalCode 非 null 且 exitCode 保持 null 的确定性手段
+    // 是父进程侧调用 Subprocess.kill()（POSIX 上对应外部信号杀死）。故借内部句柄模拟该视角；
+    // 私有字段仅测试触达，不改生产接口。
+    const proc = (orch as any).proc as Bun.Subprocess;
+    proc.kill("SIGKILL");
+    await proc.exited;
+    expect(proc.exitCode).toBeNull();
+    expect(proc.signalCode).not.toBeNull();
+    await orch.killServe();
+    expect(orch.getState()).toBe("stopped");
+    expect(orch.getRecentLogs().join("\n")).toMatch(/无需 taskkill/);
+  });
 });
 
 describe("spawnOnFallbackPort", () => {

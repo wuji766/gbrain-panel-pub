@@ -20,24 +20,31 @@ const editTitle = ref("");
 const editTags = ref("");
 const editBody = ref("");
 const saving = ref(false);
+// 原 frontmatter 中 title:/tags: 之外的其余行（date/author 等），保存时原样追加回去，保证往返不丢字段
+const editExtra = ref("");
 
-function splitContent(raw: string): { title: string; tags: string; body: string } {
+function splitContent(raw: string): { title: string; tags: string; extra: string; body: string } {
   if (raw.startsWith("---")) {
     const end = raw.indexOf("\n---", 3);
     if (end > 0) {
       const fm = raw.slice(3, end);
       const t = /^title:\s*(.*)$/m.exec(fm)?.[1]?.trim() ?? "";
       const tags = /^tags:\s*\[(.*)\]$/m.exec(fm)?.[1]?.trim() ?? "";
-      return { title: t, tags, body: raw.slice(end + 4).replace(/^\s+/, "") };
+      // 其余行剔除 title:/tags: 行、压缩空行后按原行序保留（最小保真，不做 YAML 解析）
+      const extra = fm.split(/\r?\n/)
+        .filter(line => line.trim() !== "" && !/^title:/.test(line) && !/^tags:/.test(line))
+        .join("\n");
+      return { title: t, tags, extra, body: raw.slice(end + 4).replace(/^\s+/, "") };
     }
   }
-  return { title: "", tags: "", body: raw };
+  return { title: "", tags: "", extra: "", body: raw };
 }
 
 function assemble(): string {
   const fm: string[] = [];
   if (editTitle.value.trim()) fm.push(`title: ${editTitle.value.trim()}`);
   if (editTags.value.trim()) fm.push(`tags: [${editTags.value.split(/[,，]/).map(s => s.trim()).filter(Boolean).join(", ")}]`);
+  for (const line of editExtra.value.split("\n")) if (line.trim()) fm.push(line);
   return fm.length ? `---\n${fm.join("\n")}\n---\n\n${editBody.value}` : editBody.value;
 }
 
@@ -48,7 +55,7 @@ async function load() {
     const p = data.value.page as { content?: string };
     if (typeof p.content === "string") {
       const s = splitContent(p.content);
-      editTitle.value = s.title; editTags.value = s.tags; editBody.value = s.body;
+      editTitle.value = s.title; editTags.value = s.tags; editExtra.value = s.extra; editBody.value = s.body;
     }
   } catch (e) { error.value = String(e); }
 }
@@ -103,7 +110,7 @@ onMounted(load);
         <NInput v-model:value="editTags" placeholder="标签（逗号分隔，frontmatter tags）" />
       </div>
       <textarea v-model="editBody" class="body-editor" placeholder="正文（markdown）"></textarea>
-      <p class="muted">保存时按 title/tags 是否填写自动组装 frontmatter；清空即移除对应字段。</p>
+      <p class="muted">保存时按 title/tags 是否填写自动组装 frontmatter；其余原有 frontmatter 字段将原样保留；清空 title/tags 即移除对应字段。</p>
     </div>
 
     <NTabs v-else-if="data" type="line">
