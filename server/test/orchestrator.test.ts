@@ -90,6 +90,19 @@ describe("killServe", () => {
     await new Promise(r => setTimeout(r, 300));
     expect(await probeHealth(port, 500)).toBe(false);
   });
+
+  test("子进程已自行退出时 killServe 跳过 taskkill", async () => {
+    const port = await getFreePort();
+    const orch = new Orchestrator(
+      { gbrainBin: "", gbrainHome: "", panelPort: 0, gbrainPort: port, bootstrapToken: TOKEN, backupDir: "", backupRetention: 5 },
+      { spawnSpec: { bin: process.execPath, baseArgs: [FIXTURE] }, healthTimeoutMs: 8000, pollIntervalMs: 100, spawnEnvExtra: { FAKE_MODE: "crash" } },
+    );
+    orchs.push(orch);
+    await orch.start(); // → error（子进程已退）
+    await orch.killServe();
+    expect(orch.getState()).toBe("stopped");
+    expect(orch.getRecentLogs().join("\n")).toMatch(/无需 taskkill/);
+  });
 });
 
 describe("spawnOnFallbackPort", () => {

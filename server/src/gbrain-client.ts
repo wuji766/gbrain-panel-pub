@@ -17,8 +17,14 @@ let rpcId = 0;
 export class GbrainClient {
   private cookie: string | null = null;
   private apiKey: string | null = null;
+  // 端口支持 getter：fallback 换端口后 client 自动跟随（数字用法不变）
+  private readonly portRef: number | (() => number);
 
-  constructor(private port: number, private bootstrapToken: string) {}
+  constructor(port: number | (() => number), private bootstrapToken: string) {
+    this.portRef = port;
+  }
+
+  private get port(): number { return typeof this.portRef === "function" ? this.portRef() : this.portRef; }
 
   private base() { return `http://127.0.0.1:${this.port}`; }
 
@@ -66,9 +72,12 @@ export class GbrainClient {
   }
 
   async mcpRequest<T = unknown>(method: string, params?: unknown): Promise<T> {
-    // key 按需自签；签发失败（如 admin 会话不可用）不阻塞，匿名直连由服务端裁决
+    // key 按需自签；签发失败（如 admin 会话不可用）不阻塞，匿名直连由服务端裁决。
+    // 失败原因记入 issuanceError：匿名又遭 401/403 时附进错误消息，透出真正根因。
+    let issuanceError: unknown = null;
     if (!this.apiKey) {
-      try { this.apiKey = await this.issueApiKey("gbrain-panel"); } catch { this.apiKey = null; }
+      try { this.apiKey = await this.issueApiKey("gbrain-panel"); }
+      catch (e) { issuanceError = e; this.apiKey = null; }
     }
     const res = await fetch(this.base() + "/mcp", {
       method: "POST",
@@ -79,7 +88,13 @@ export class GbrainClient {
       },
       body: JSON.stringify({ jsonrpc: "2.0", id: ++rpcId, method, params: params ?? {} }),
     });
-    if (!res.ok) throw new Error(`mcp ${method} -> HTTP ${res.status}: ${(await res.text()).slice(0, 300)}`);
+    if (!res.ok) {
+      let msg = `mcp ${method} -> HTTP ${res.status}: ${(await res.text()).slice(0, 300)}`;
+      if ((res.status === 401 || res.status === 403) && issuanceError) {
+        msg += `（根因：API key 签发失败——${String(issuanceError)}）`;
+      }
+      throw new Error(msg);
+    }
     const ctype = res.headers.get("content-type") ?? "";
     const payload: any = ctype.includes("text/event-stream")
       ? parseSseJson(await res.text())

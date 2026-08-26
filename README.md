@@ -30,6 +30,9 @@ bun test
 - 面板正常退出（Ctrl+C）会整树杀掉 serve 并释放锁，ZCode MCP 随即恢复可用。
 - 若面板被强杀留下孤儿 serve/锁：任务管理器结束 gbrain 相关进程，或用面板的
   `/api/stale-lock` 判定后清理（心跳超 90s 视为陈旧）。
+- fallback（面板换 3132+ 自建 serve）仅适用于「3131 被占但 PGLite 锁空闲」的场景；若锁被
+  ZCode 的 stdio MCP 或其他进程持有，新端口上的 serve 也会因锁冲突启动失败（表现：面板 error
+  态 + 日志含锁冲突信息），此时请先释放锁再启动面板。
 
 ## M1 验收清单（手动）
 
