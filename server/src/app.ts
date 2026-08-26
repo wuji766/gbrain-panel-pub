@@ -5,6 +5,7 @@ import type { PanelConfig } from "./config";
 import type { Orchestrator } from "./orchestrator";
 import type { GbrainClient } from "./gbrain-client";
 import { readLockStatus } from "./stale-lock";
+import { contentRoutes } from "./routes/content";
 
 export function createApp(deps: { cfg: PanelConfig; orch: Orchestrator; client: GbrainClient }) {
   const { cfg, orch, client } = deps;
@@ -29,6 +30,13 @@ export function createApp(deps: { cfg: PanelConfig; orch: Orchestrator; client: 
     const state = await orch.spawnOnFallbackPort();
     return c.json({ state, effectivePort: orch.getEffectivePort() });
   });
+
+  app.get("/api/full-stats", async c => {
+    try { return c.json(await client.adminGet("/admin/api/full-stats")); }
+    catch (e) { return c.json({ error: String(e) }, 502); }
+  });
+
+  app.route("/api", contentRoutes(client));
 
   // 静态托管 web/dist（SPA 回退）；无 dist 时给出可读提示
   const distRoot = resolve(join(import.meta.dir, "..", "..", "web", "dist"));

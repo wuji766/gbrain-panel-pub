@@ -3,6 +3,10 @@ import { spawn } from "node:child_process";
 import { createServer } from "node:net";
 import { join } from "node:path";
 import { probeHealth } from "../src/health";
+import { Orchestrator } from "../src/orchestrator";
+import { GbrainClient } from "../src/gbrain-client";
+import { createApp } from "../src/app";
+import type { PanelConfig } from "../src/config";
 
 export function getFreePort(): Promise<number> {
   return new Promise((resolve, reject) => {
@@ -47,4 +51,16 @@ export async function startFakeGbrain(opts: {
       await new Promise(r => setTimeout(r, 200));
     },
   };
+}
+
+export async function bootPanelWithFake(mode: "healthy" | "foreign", token: string) {
+  const fake = await startFakeGbrain({ mode, token });
+  const cfg: PanelConfig = { gbrainBin: "", gbrainHome: "", panelPort: 0, gbrainPort: fake.port, bootstrapToken: token, backupDir: "", backupRetention: 5 };
+  const orch = new Orchestrator(cfg, { spawnSpec: { bin: "unused", baseArgs: [] } });
+  await orch.start();
+  const client = new GbrainClient(orch.getEffectivePort(), token);
+  const app = createApp({ cfg, orch, client });
+  const panelPort = await getFreePort();
+  const server = Bun.serve({ port: panelPort, hostname: "127.0.0.1", fetch: app.fetch });
+  return { panelPort, fake, cfg, orch, client, server };
 }
