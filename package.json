@@ -4,6 +4,7 @@
   "workspaces": ["server", "web"],
   "scripts": {
     "dev:server": "bun run server/src/index.ts",
+    "build:web": "bun run --cwd web build",
     "test": "bun test server/",
     "discover": "bun run server/scripts/discover.ts"
   }
