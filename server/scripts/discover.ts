@@ -22,6 +22,7 @@ async function main() {
   if (state !== "own") {
     console.error(`serve 未就绪（${state}）：\n${orch.getRecentLogs().slice(-20).join("\n")}`);
     console.error("若报锁冲突：关闭正在使用 gbrain 的 ZCode 会话后重试。");
+    await orch.killServe(); // 健康等待超时但子进程仍存活时，先释放锁再退出，避免留下持锁孤儿 serve
     process.exit(1);
   }
 
@@ -47,4 +48,4 @@ async function main() {
   }
 }
 
-main();
+main().catch(err => { console.error("[discover] 未预期错误:", err); process.exit(1); });
