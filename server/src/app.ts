@@ -48,6 +48,11 @@ export function createApp(deps: { cfg: PanelConfig; orch: Orchestrator; client: 
     return withinDist(p) ? p : null;
   };
   app.all("*", async c => {
+    // Bun 1.3.14 Windows：带 body 的请求命中本 catch-all 且返回 new Response(BunFile)（流式）时，
+    // 未消费的请求体会触发主线程 panic（Internal assertion failure，进程崩溃，回归测试 12/12 复现）。
+    // 第一行先把请求体完整读走（body.cancel() 实测无效，仍 panic；arrayBuffer 实测有效）。
+    // 必须放 catch-all 内而非全局 middleware——实测后者会破坏 API 路由的 c.req.json()。
+    await c.req.arrayBuffer().catch(() => null);
     const rel = c.req.path === "/" ? "index.html" : c.req.path.replace(/^\/+/, "");
     const target = safeDistPath(rel);
     if (!target) return c.text("Not Found", 404);

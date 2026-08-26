@@ -57,3 +57,17 @@ describe("静态托管路径穿越防护", () => {
     expect(body.includes("gbrain-panel")).toBe(false); // 不得泄露仓库根 package.json 内容
   });
 });
+
+describe("静态 catch-all 带体请求不崩溃（Bun panic 回归）", () => {
+  test("POST 带 body 打未知路径后面板仍存活", async () => {
+    const b = await bootPanelWithFake("healthy", TOKEN);
+    panels.push(b.server); fakes.push(b.fake);
+    const { panelPort } = b;
+    const res = await fetch(`http://127.0.0.1:${panelPort}/definitely/not/a/route`, {
+      method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ x: 1 }),
+    });
+    expect([200, 404]).toContain(res.status);
+    const alive = await fetch(`http://127.0.0.1:${panelPort}/api/status`);
+    expect(alive.status).toBe(200);
+  });
+});
