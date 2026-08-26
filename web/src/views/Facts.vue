@@ -37,24 +37,24 @@ async function load() {
 }
 
 async function submitForget() {
-  if (!forgetTarget.value || !forgetReason.value.trim()) { message.warning("理由必填"); return; }
+  if (!forgetTarget.value || !forgetReason.value.trim()) { message.warning("理由必填"); return false; }
   const id = forgetTarget.value.fact_id ?? forgetTarget.value.id ?? "";
   try {
     await api(`/facts/${encodeURIComponent(id)}/forget`, { method: "POST", body: JSON.stringify({ reason: forgetReason.value.trim() }) });
     message.success("已遗忘（过期，审计保留）");
     showForget.value = false; forgetReason.value = "";
     await load();
-  } catch (e) { message.error(String(e)); }
+  } catch (e) { message.error(String(e)); return false; }
 }
 
 async function createFact() {
-  if (!newFact.value.trim()) { message.warning("内容必填"); return; }
+  if (!newFact.value.trim()) { message.warning("内容必填"); return false; }
   try {
     await api("/facts", { method: "POST", body: JSON.stringify({ fact: newFact.value.trim(), ...(newEntity.value.trim() ? { entity: newEntity.value.trim() } : {}), ...(newKind.value ? { kind: newKind.value } : {}) }) });
     message.success("已记住");
     newFact.value = ""; showNew.value = false;
     await load();
-  } catch (e) { message.error(String(e)); }
+  } catch (e) { message.error(String(e)); return false; }
 }
 
 function hForget(f: Fact) {
