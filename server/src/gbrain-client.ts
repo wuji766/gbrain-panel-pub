@@ -105,8 +105,13 @@ export class GbrainClient {
 
   async mcpCall<T = unknown>(op: string, args: Record<string, unknown> = {}): Promise<T> {
     try {
-      const result = await this.mcpRequest<{ content?: { type: string; text?: string }[] }>("tools/call", { name: op, arguments: args });
+      const result = await this.mcpRequest<{ content?: { type: string; text?: string }[]; isError?: boolean }>("tools/call", { name: op, arguments: args });
       const text = result?.content?.[0]?.text;
+      // 工具级错误：HTTP 200 且 rpc 层无 error，但工具执行失败（isError=true）。
+      // 不拦截的话错误体会被当正常数据解包返回，路由层 200 假成功（M3-2 加固）。
+      if (result?.isError) {
+        throw new Error(`mcp ${op} 工具级错误: ${typeof text === "string" ? text.slice(0, 300) : JSON.stringify(result.content)}`);
+      }
       if (typeof text === "string") {
         try { return JSON.parse(text) as T; } catch { return text as unknown as T; }
       }

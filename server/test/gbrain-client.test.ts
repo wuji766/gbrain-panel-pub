@@ -108,4 +108,14 @@ describe("GbrainClient", () => {
     const client = new GbrainClient(PORT, "tok");
     await expect(client.mcpCall("list_pages")).rejects.toThrow(/根因.*api-keys 响应无 key 字段/);
   });
+
+  test("mcpCall 检查工具级 isError 并抛错", async () => {
+    responder = (c) => {
+      if (c.url.endsWith("/admin/api/api-keys")) return { status: 200, json: { key: "kkk" } };
+      if (c.url.endsWith("/mcp")) return { status: 200, json: { jsonrpc: "2.0", id: c.body.id, result: { content: [{ type: "text", text: '{"error":"not found"}' }], isError: true } } };
+      return { status: 204, cookie: "s" };
+    };
+    const client = new GbrainClient(PORT, "tok");
+    await expect(client.mcpCall("delete_page", { slug: "x" })).rejects.toThrow(/delete_page 工具级错误.*not found/);
+  });
 });

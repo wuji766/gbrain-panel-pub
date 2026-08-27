@@ -78,6 +78,16 @@ describe("Orchestrator.start", () => {
     orchs.push(orch);
     expect(await orch.start()).toBe("error");
   });
+
+  test("own 态重入 start() 直接返回 own，不重新 spawn", async () => {
+    const port = await getFreePort();
+    const orch = makeOrch(port);
+    expect(await orch.start()).toBe("own");
+    // makeOrch 的替身未配 FAKE_TOKEN（admin 登录必 401）：无守卫时重入 start() 会重探测并误判 foreign
+    expect(await orch.start()).toBe("own");
+    expect(orch.getEffectivePort()).toBe(port);
+    expect(await probeHealth(port, 2000)).toBe(true); // 原进程仍活
+  });
 });
 
 describe("killServe", () => {

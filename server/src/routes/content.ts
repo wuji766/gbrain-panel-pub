@@ -3,7 +3,8 @@ import { Hono } from "hono";
 import type { GbrainClient } from "../gbrain-client";
 
 // 注：slug 可含斜杠（如 notes/m2-test），Hono 的 :slug 只匹配单段，
-// 故四处 slug 路由用 :slug{.+}（TDD 实测：普通 :slug 对 /pages/notes/m2-test 返回 404）。
+// 故 slug 路由用 :slug{.+}（TDD 实测：普通 :slug 对 /pages/notes/m2-test 返回 404）。
+// 例外：GET 详情与 versions 路由用非贪婪 :slug{.+?}（原因见 versions 路由处注释）。
 
 // 真实 gbrain 的 list_pages/search 返回裸数组（2026-08-27 实测 + docs/discovery.json），
 // 面板 API 统一归一化为 {pages, total}；fake MCP 曾按包装形状实现导致真机列表恒空（M2 BUG-1）。
@@ -27,18 +28,28 @@ async function enrichDeletedAt(client: GbrainClient, rows: Record<string, unknow
   }));
 }
 
+// limit/offset NaN 守卫：非有限数或负数回默认，杜绝 ?limit=abc 产生 NaN 下传
+// （JSON.stringify 会把 NaN 变 null 掩盖问题，真实 gbrain 对非法分页参数未必兜底）
+const numOr = (v: string | undefined, d: number) => {
+  const n = Number(v);
+  return Number.isFinite(n) && n >= 0 ? Math.floor(n) : d;
+};
+
 export function contentRoutes(client: GbrainClient) {
   const app = new Hono();
 
   app.get("/pages", async c => {
     const q = c.req.query("q")?.trim();
-    const limit = Number(c.req.query("limit") ?? 50);
-    const offset = Number(c.req.query("offset") ?? 0);
+    const limit = numOr(c.req.query("limit"), 50);
+    const offset = numOr(c.req.query("offset"), 0);
     const includeDeleted = c.req.query("include_deleted") === "true";
+    const typeParam = c.req.query("type");
     try {
       let res: unknown;
-      if (q) res = await client.mcpCall("search", { query: q, limit, offset });
-      else {
+      if (q) {
+        // q + type 组合：search 无 type 单数参数，type 映射进 types 数组（M3-2 加固）
+        res = await client.mcpCall("search", { query: q, limit, offset, ...(typeParam ? { types: [typeParam] } : {}) });
+      } else {
         const args: Record<string, unknown> = { limit, offset, include_deleted: includeDeleted };
         for (const k of ["type", "tag", "sort", "updated_after"] as const) {
           const v = c.req.query(k);
@@ -52,9 +63,18 @@ export function contentRoutes(client: GbrainClient) {
     } catch (e) { return c.json({ error: String(e) }, 502); }
   });
 
-  app.get("/pages/:slug{.+}", async c => {
+  // 版本列表路由。注意：详情路由用贪婪 :slug{.+} 时会吞掉 "/xxx/versions" 后缀
+  // （hono reg-exp-router 的终端标记排在交替分支最前，与注册顺序无关，实测复现），
+  // 故详情改用非贪婪 :slug{.+?} 且两路由共享同一 token，使后缀路由正确优先（两种注册顺序实测均对）。
+  app.get("/pages/:slug{.+?}/versions", async c => {
+    try { return c.json(await client.mcpCall("get_versions", { slug: c.req.param("slug") })); }
+    catch (e) { return c.json({ error: String(e) }, 502); }
+  });
+
+  app.get("/pages/:slug{.+?}", async c => {
     const slug = c.req.param("slug");
-    const includeDeleted = c.req.query("include_deleted") === "true";
+    // 默认含已删页：回收站详情/恢复入口需要；显式 ?include_deleted=false 关闭
+    const includeDeleted = c.req.query("include_deleted") !== "false";
     try {
       const [pageRes, links, timeline] = await Promise.all([
         client.mcpCall("get_page", { slug, include_content: true, include_deleted: includeDeleted }),

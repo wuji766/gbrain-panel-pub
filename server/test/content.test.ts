@@ -112,3 +112,42 @@ describe("/api/update-check", () => {
     expect(["current", "latest", "networkError", "upToDate", "checkedAt"].every(k => k in json)).toBe(true);
   });
 });
+
+describe("M3 server 加固", () => {
+  test("op 级错误（isError）→ 502 而非 200 假成功", async () => {
+    const { panelPort } = await boot();
+    const res = await fetch(`http://127.0.0.1:${panelPort}/api/pages/no/such/page`, { method: "DELETE" });
+    expect(res.status).toBe(502);
+  });
+
+  test("q + type 组合：type 映射进 search types 参数", async () => {
+    const { panelPort } = await boot();
+    // fake 的 search 不认 types——仅断言不 500 且仍是 search 形状（面板统一归一化为 {pages,total}）
+    const res = await fetch(`http://127.0.0.1:${panelPort}/api/pages?q=seed&type=note`);
+    expect(res.status).toBe(200);
+    const json = await res.json() as any;
+    expect(Array.isArray(json.pages)).toBe(true);
+  });
+
+  test("limit=abc 回退默认不产生 NaN 下传", async () => {
+    const { panelPort } = await boot();
+    const res = await fetch(`http://127.0.0.1:${panelPort}/api/pages?limit=abc`);
+    expect(res.status).toBe(200);
+    const json = await res.json() as any;
+    expect(Array.isArray(json.pages)).toBe(true);
+    // NaN 下传时下游 slice(0, NaN) 得空列表；守卫生效则默认 limit=50 能拿到种子页
+    expect(json.pages.length).toBeGreaterThan(0);
+  });
+
+  test("详情默认含已删页（可看 deleted_at）", async () => {
+    const { panelPort } = await boot();
+    const json = await (await fetch(`http://127.0.0.1:${panelPort}/api/pages/notes/dead-page`)).json() as any;
+    expect(json.page.deleted_at).toBeTruthy();
+  });
+
+  test("GET /api/pages/:slug/versions 返回版本列表", async () => {
+    const { panelPort } = await boot();
+    const json = await (await fetch(`http://127.0.0.1:${panelPort}/api/pages/notes/seed-1/versions`)).json() as any;
+    expect(json.versions.length).toBe(2);
+  });
+});

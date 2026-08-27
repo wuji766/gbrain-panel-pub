@@ -59,6 +59,9 @@ export class Orchestrator {
   }
 
   async start(): Promise<OrchState> {
+    // 重入守卫：starting/own 时直接返回，不重探测（own 重探测遇 token 不匹配会误判 foreign）
+    // 也不重拉（避免双进程抢端口）。attached/foreign 允许重探测以跟随外部状态变化。
+    if (this.state === "starting" || this.state === "own") return this.state;
     this.setState("probing");
     if (await probeHealth(this.cfg.gbrainPort, 2000)) {
       const ok = (await adminLoginRequest(this.cfg.gbrainPort, this.cfg.bootstrapToken)) !== null;
@@ -83,6 +86,12 @@ export class Orchestrator {
   }
 
   private async spawnAt(port: number): Promise<OrchState> {
+    // 重入守卫：上一个自己的子进程仍存活（未退出）时先清理再 spawn，防双进程/端口冲突。
+    // killServe 只处理 this.proc（自己的进程），attached/foreign 场景 this.proc 为 null 不受影响。
+    if (this.proc && this.proc.exitCode === null && this.proc.signalCode === null) {
+      this.log("spawn 前清理仍存活的上一个子进程");
+      await this.killServe();
+    }
     this.setState("spawning", `spawn serve @${port}`);
     this.effectivePort = port;
     const args = [...this.spawnSpec.baseArgs, "serve", "--http", "--surface", "full",
