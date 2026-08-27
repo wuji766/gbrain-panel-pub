@@ -35,6 +35,7 @@ async function load() {
     if (entity.value.trim()) params.set("entity", entity.value.trim());
     const json = await api<{ facts?: Fact[] }>(`/facts?${params}`);
     facts.value = json.facts ?? [];
+    if (facts.value.length >= 100) message.warning("已达 gbrain recall 上限 100 条，请用实体过滤缩小范围", { duration: 5000 });
   } catch (e) { message.error(String(e)); }
   finally { loading.value = false; }
 }

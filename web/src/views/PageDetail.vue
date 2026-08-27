@@ -14,6 +14,8 @@ const message = useMessage();
 const slug = decodeURIComponent(String(route.params.slug));
 
 const data = ref<PageData | null>(null);
+// 版本列表（Task 2 的 /versions 路由）；失败静默为 null → 模板显示“不可用”
+const versions = ref<{ versions?: unknown[] } | null>(null);
 const error = ref<string | null>(null);
 const editing = ref(false);
 const editTitle = ref("");
@@ -57,6 +59,7 @@ async function load() {
       const s = splitContent(p.content);
       editTitle.value = s.title; editTags.value = s.tags; editExtra.value = s.extra; editBody.value = s.body;
     }
+    versions.value = await api<{ versions?: unknown[] }>(`/pages/${encodeURIComponent(slug)}/versions`).catch(() => null);
   } catch (e) { error.value = String(e); }
 }
 
@@ -132,6 +135,9 @@ onMounted(load);
       </NTabPane>
       <NTabPane name="timeline" tab="时间线">
         <pre>{{ JSON.stringify(data.timeline, null, 2) }}</pre>
+      </NTabPane>
+      <NTabPane name="versions" tab="版本">
+        <pre>{{ versions ? JSON.stringify(versions, null, 2) : "不可用" }}</pre>
       </NTabPane>
     </NTabs>
   </div>
