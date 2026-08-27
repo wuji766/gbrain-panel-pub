@@ -49,4 +49,52 @@ describe("fake /mcp 分发器（op 形状对齐真实 gbrain：list/search 裸�
     const after = await c.mcpCall<{ facts: { fact_id: string; expired_at: string | null }[] }>("recall", { entity: "test-entity", include_expired: true });
     expect(after.facts.some(f => f.fact_id === mem.id && f.expired_at)).toBe(true);
   });
+
+  test("isError：fail 分支带 isError 标记（经 mcpCall 应抛错——此处直接验外壳）", async () => {
+    const { c, h } = await client();
+    // 直接发原始 JSON-RPC 看 isError 字段（mcpCall 抛错行为在 Task 2 的 client 层测）
+    const res = await fetch(`http://127.0.0.1:${h.port}/mcp`, {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ jsonrpc: "2.0", id: 999, method: "tools/call", params: { name: "delete_page", arguments: { slug: "no/such" } } }),
+    });
+    const payload = await res.json();
+    expect(payload.result.isError).toBe(true);
+    expect(JSON.parse(payload.result.content[0].text).error).toBeTruthy();
+  });
+
+  test("traverse_graph：out/in/both 三向", async () => {
+    const { c } = await client();
+    const out = await c.mcpCall<{ edges: { source: string; target: string }[]; nodes: { slug: string }[] }>("traverse_graph", { slug: "people/alice", depth: 1, direction: "out" });
+    expect(out.edges.some(e => e.source === "people/alice" && e.target === "notes/seed-2")).toBe(true);
+    const inbound = await c.mcpCall<{ edges: { source: string; target: string }[] }>("traverse_graph", { slug: "people/alice", depth: 1, direction: "in" });
+    expect(inbound.edges.some(e => e.source === "notes/seed-1" && e.target === "people/alice")).toBe(true);
+    const both = await c.mcpCall<{ edges: { source: string; target: string }[] }>("traverse_graph", { slug: "people/alice", depth: 1, direction: "both" });
+    expect(both.edges.length).toBe(2);
+  });
+
+  test("entity：命中与未命中", async () => {
+    const { c } = await client();
+    const hit = await c.mcpCall<{ found: boolean; card?: { entity: { slug: string } } }>("entity", { name: "alice" });
+    expect(hit.found).toBe(true);
+    expect(hit.card?.entity.slug).toBe("people/alice");
+    const miss = await c.mcpCall<{ found: boolean; suggestions?: unknown[] }>("entity", { name: "nobody" });
+    expect(miss.found).toBe(false);
+  });
+
+  test("get_versions", async () => {
+    const { c } = await client();
+    const v = await c.mcpCall<{ versions: { version: number }[] }>("get_versions", { slug: "notes/seed-1" });
+    expect(v.versions.length).toBe(2);
+  });
+
+  test("get_page 默认不含已删页；list_pages sort=updated", async () => {
+    const { c } = await client();
+    const dead = await c.mcpCall<{ found: boolean }>("get_page", { slug: "notes/dead-page" });
+    expect(dead.found).toBe(false);
+    const withDeleted = await c.mcpCall<{ page?: unknown; found: boolean }>("get_page", { slug: "notes/dead-page", include_deleted: true });
+    expect(withDeleted.found).toBe(true);
+    // 注：简报原文断言 sorted.pages[0]（包装形状）；基线已对齐真机裸数组形状（b97bdeb），此处取 sorted[0]
+    const sorted = await c.mcpCall<{ slug: string }[]>("list_pages", { sort: "updated", limit: 3, include_deleted: true });
+    expect(sorted[0].slug).toBe("notes/seed-2"); // 种子中最新
+  });
 });

@@ -10,10 +10,12 @@ interface FakePage { slug: string; title: string; type: string; content: string;
 interface FakeFact { factId: string; entity: string; fact: string; kind: string; visibility: string; expiredAt: string | null; validFrom: string }
 const pages = new Map<string, FakePage>();
 const facts = new Map<string, FakeFact>();
+const links = [{ from: "notes/seed-1", to: "people/alice", type: "note" }, { from: "people/alice", to: "notes/seed-2", type: "note" }];
 let factSeq = 100;
 function seed(): void {
   pages.set("notes/seed-1", { slug: "notes/seed-1", title: "种子页一", type: "note", content: "# 种子页一\n\n内容", deletedAt: null, updatedAt: "2026-08-20T00:00:00Z" });
   pages.set("people/alice", { slug: "people/alice", title: "Alice", type: "person", content: "# Alice", deletedAt: null, updatedAt: "2026-08-21T00:00:00Z" });
+  pages.set("notes/seed-2", { slug: "notes/seed-2", title: "种子页二", type: "note", content: "# 二", deletedAt: null, updatedAt: "2026-08-25T00:00:00Z" });
   pages.set("notes/dead-page", { slug: "notes/dead-page", title: "已删页", type: "note", content: "x", deletedAt: "2026-08-22T00:00:00Z", updatedAt: "2026-08-22T00:00:00Z" });
   facts.set("1", { factId: "1", entity: "people/alice", fact: "Alice 喜欢咖啡", kind: "preference", visibility: "world", expiredAt: null, validFrom: "2026-08-20T00:00:00Z" });
   facts.set("2", { factId: "2", entity: "people/alice", fact: "旧事实", kind: "event", visibility: "private", expiredAt: "2026-08-22T00:00:00Z", validFrom: "2026-08-21T00:00:00Z" });
@@ -64,19 +66,21 @@ if (mode === "hang") {
         const name = body?.params?.name as string;
         const a = (body?.params?.arguments ?? {}) as Record<string, any>;
         const ok = (data: unknown) => Response.json({ jsonrpc: "2.0", id: body.id, result: { content: [{ type: "text", text: JSON.stringify(data) }] } });
-        const fail = (msg: string) => Response.json({ jsonrpc: "2.0", id: body.id, result: { content: [{ type: "text", text: JSON.stringify({ error: msg }) }] } });
+        const fail = (msg: string) => Response.json({ jsonrpc: "2.0", id: body.id, result: { content: [{ type: "text", text: JSON.stringify({ error: msg }) }], isError: true } });
         switch (name) {
           case "list_pages": {
             // 真实形状：裸数组，行 = {slug, source_id, type, title, updated_at}（无 deleted_at、无 total）
             const all = [...pages.values()].filter(p => (a.include_deleted ? true : !p.deletedAt) && (!a.type || p.type === a.type));
+            if (a.sort === "updated") all.sort((x, y) => y.updatedAt.localeCompare(x.updatedAt));
             const offset = a.offset ?? 0, limit = a.limit ?? 50;
             return ok(all.slice(offset, offset + limit).map(p => ({ slug: p.slug, source_id: "default", type: p.type, title: p.title, updated_at: p.updatedAt })));
           }
           case "get_page": {
             const p = pages.get(a.slug);
             if (!p) return ok({ found: false });
+            if (p && p.deletedAt && !a.include_deleted) return ok({ found: false });
             const body = p.content.startsWith("---") ? (p.content.slice(p.content.indexOf("\n---", 3) + 4).trim()) : p.content;
-            return ok({ page: { slug: p.slug, title: p.title, type: p.type, ...(a.include_content ? { content: p.content, compiled_truth: body } : {}), updated_at: p.updatedAt, deleted_at: p.deletedAt } });
+            return ok({ found: true, page: { slug: p.slug, title: p.title, type: p.type, ...(a.include_content ? { content: p.content, compiled_truth: body } : {}), updated_at: p.updatedAt, deleted_at: p.deletedAt } });
           }
           case "put_page": {
             const existing = pages.get(a.slug);
@@ -124,6 +128,50 @@ if (mode === "hang") {
             if (!f) return fail("not_found");
             f.expiredAt = new Date().toISOString();
             return ok({ id: String(a.id), expired: true, reason: a.reason ?? "" });
+          }
+          case "traverse_graph": {
+            const direction = a.direction ?? "out";
+            const depth = Math.min(a.depth ?? 5, 10);
+            const seen = new Set<string>();
+            const edges: { source: string; target: string; type: string }[] = [];
+            const slugs = new Set<string>([a.slug]);
+            let frontier = [a.slug];
+            for (let d = 0; d < depth; d++) {
+              const next: string[] = [];
+              for (const s of frontier) {
+                for (const l of links) {
+                  if (direction === "in" ? l.to === s : direction === "out" ? l.from === s : l.from === s || l.to === s) {
+                    const edge = { source: l.from, target: l.to, type: l.type };
+                    const key = `${l.from}->${l.to}`;
+                    if (!seen.has(key)) { seen.add(key); edges.push(edge); }
+                    const other = l.from === s ? l.to : l.from;
+                    if (!slugs.has(other)) { slugs.add(other); next.push(other); }
+                  }
+                }
+              }
+              frontier = next;
+              if (!frontier.length) break;
+            }
+            const nodes = [...slugs].map(sg => pages.get(sg)).filter((p): p is FakePage => Boolean(p)).map((p: FakePage) => ({ slug: p.slug, title: p.title, type: p.type }));
+            return ok({ edges, nodes });
+          }
+          case "entity": {
+            const q = String(a.name ?? "").toLowerCase();
+            const hit = [...pages.values()].find(p => p.slug.toLowerCase().includes(q) || p.title.toLowerCase().includes(q));
+            if (!hit) return ok({ found: false, suggestions: [{ slug: "people/alice", title: "Alice" }] });
+            return ok({ found: true, card: {
+              entity: { slug: hit.slug, title: hit.title, type: hit.type }, aka: [], summary: "fake summary",
+              last_touched: hit.updatedAt, open_threads: [],
+              edges: [{ type: "note", direction: "out", slug: "notes/seed-2" }], backlink_count: 1, active_fact_count: 1,
+            } });
+          }
+          case "get_versions": {
+            const p = pages.get(a.slug);
+            if (!p) return fail("not found");
+            return ok({ versions: [
+              { version: 1, created_at: "2026-08-01T00:00:00Z", label: "初始" },
+              { version: 2, created_at: "2026-08-20T00:00:00Z", label: "编辑" },
+            ] });
           }
           default: return fail(`unknown op ${name}`);
         }
