@@ -120,7 +120,7 @@ export class Orchestrator {
     const deadline = Date.now() + this.healthTimeoutMs;
     while (Date.now() < deadline) {
       if (await probeHealth(port, 1000)) { this.setState("own", `serve 就绪 @${port}`); return "own"; }
-      if (this.proc.exitCode !== null) break; // 已退出
+      if (!this.proc || this.proc.exitCode !== null) break; // 已退出（proc 可能已被并发 killServe 置空）
       await sleep(this.pollIntervalMs);
     }
     if (this.state !== "own") this.setState("error", "健康等待超时");
