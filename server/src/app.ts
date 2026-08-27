@@ -6,6 +6,7 @@ import type { Orchestrator } from "./orchestrator";
 import type { GbrainClient } from "./gbrain-client";
 import { readLockStatus } from "./stale-lock";
 import { contentRoutes } from "./routes/content";
+import { graphRoutes } from "./routes/graph";
 
 export function createApp(deps: { cfg: PanelConfig; orch: Orchestrator; client: GbrainClient }) {
   const { cfg, orch, client } = deps;
@@ -69,6 +70,7 @@ export function createApp(deps: { cfg: PanelConfig; orch: Orchestrator; client: 
   });
 
   app.route("/api", contentRoutes(client));
+  app.route("/api", graphRoutes(client));
 
   // 静态托管 web/dist（SPA 回退）；无 dist 时给出可读提示
   const distRoot = resolve(join(import.meta.dir, "..", "..", "web", "dist"));
