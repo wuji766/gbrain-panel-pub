@@ -24,17 +24,19 @@ async function load() {
     const params = new URLSearchParams({ limit: String(pageSize), offset: String((page.value - 1) * pageSize) });
     if (query.value.trim()) params.set("q", query.value.trim());
     if (typeFilter.value.trim()) params.set("type", typeFilter.value.trim());
-    const json = await api<{ pages?: Row[]; results?: Row[]; total?: number }>(`/pages?${params}`);
-    rows.value = (json.pages ?? json.results ?? []) as Row[];
-    total.value = json.total ?? rows.value.length;
+    // 面板 API 已归一化为 {pages,total}；兼容裸数组（防御性，M2 BUG-1 教训：形状不符时静默清空）
+    const json = await api<{ pages?: Row[]; results?: Row[]; total?: number } | Row[]>(`/pages?${params}`);
+    rows.value = (Array.isArray(json) ? json : (json.pages ?? json.results ?? [])) as Row[];
+    total.value = (Array.isArray(json) ? undefined : json.total) ?? rows.value.length;
   } catch (e) { message.error(String(e)); }
   finally { loading.value = false; }
 }
 
 async function loadRecycled() {
   try {
-    const json = await api<{ pages?: Row[] }>(`/pages?include_deleted=true&limit=100`);
-    recycled.value = (json.pages ?? []).filter(r => r.deleted_at);
+    const json = await api<{ pages?: Row[] } | Row[]>(`/pages?include_deleted=true&limit=100`);
+    const list = Array.isArray(json) ? json : (json.pages ?? []);
+    recycled.value = (list as Row[]).filter(r => r.deleted_at);
   } catch (e) { message.error(String(e)); }
 }
 

@@ -11,6 +11,10 @@ export interface PanelConfig {
   bootstrapToken: string;
   backupDir: string;
   backupRetention: number;
+  /** 检查更新时若 GitHub 直连失败的代理兜底（如 http://127.0.0.1:7897）；空 = 仅直连 */
+  updateProxy: string;
+  /** 检查更新的 VERSION 源（与 gbrain check-update 同源）；可注入以便测试 */
+  updateUrl: string;
 }
 
 export const DEFAULTS = {
@@ -20,6 +24,8 @@ export const DEFAULTS = {
   gbrainPort: 3131,
   backupDir: "D:\\gbrain-backup",
   backupRetention: 5,
+  updateProxy: "",
+  updateUrl: "https://raw.githubusercontent.com/garrytan/gbrain/master/VERSION",
 };
 
 export function generateToken(): string {

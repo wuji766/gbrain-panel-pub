@@ -81,7 +81,13 @@ async function restore() {
   catch (e) { message.error(String(e)); }
 }
 
-const content = () => (data.value?.page as { content?: string } | undefined)?.content ?? "";
+// 正文渲染优先 compiled_truth（真实 get_page 提供，不含 frontmatter）；无则用 content 去掉 frontmatter 前缀
+const content = () => {
+  const p = data.value?.page as { compiled_truth?: string; content?: string } | undefined;
+  if (typeof p?.compiled_truth === "string" && p.compiled_truth.trim()) return p.compiled_truth;
+  const raw = p?.content ?? "";
+  return raw.startsWith("---") ? splitContent(raw).body : raw;
+};
 const deleted = () => Boolean((data.value?.page as { deleted_at?: string | null } | undefined)?.deleted_at);
 
 onMounted(load);
@@ -116,7 +122,7 @@ onMounted(load);
     <NTabs v-else-if="data" type="line">
       <NTabPane name="content" tab="正文">
         <MarkdownView v-if="content()" :source="content()" />
-        <p v-else class="muted">无内容（或真实 get_page 未返回 content 字段——见下方元数据）</p>
+        <p v-else class="muted">无内容（get_page 未返回 compiled_truth/content 字段——见下方元数据）</p>
       </NTabPane>
       <NTabPane name="meta" tab="元数据">
         <pre>{{ JSON.stringify(data.page, null, 2) }}</pre>

@@ -1,10 +1,10 @@
 {
-  "generatedAt": "2026-08-26T13:00:28.066Z",
+  "generatedAt": "2026-08-27T05:14:57.830Z",
   "statsShape": {
     "connected_agents": 0,
     "active_tokens": 0,
-    "active_api_keys": 0,
-    "requests_today": 0
+    "active_api_keys": 10,
+    "requests_today": 125
   },
   "apiKeyShape": {
     "prefix": "gbrain",
@@ -339,6 +339,10 @@
             "type": "string",
             "description": "Search mode (conservative|balanced|tokenmax). Local callers only."
           },
+          "source_id": {
+            "type": "string",
+            "description": "Scope search to a single source. Defaults to OperationContext.sourceId (set from CLI --source / GBRAIN_SOURCE / .gbrain-source dotfile); when unset, an unqualified read spans every federated source. Pass '__all__' to span every source for trusted local callers; for remote callers '__all__' spans only your granted sources."
+          },
           "types": {
             "type": "array",
             "description": "Filter results to pages whose `type` is in this list (e.g. ['person','company']). CLI: --types person,company. Applied at SQL level on every retrieval leg — the same filter `whoknows` uses. Stacks with all other filters.",
@@ -349,10 +353,6 @@
           "snippet_chars": {
             "type": "number",
             "description": "Cap each result's chunk_text at N characters (a \"… [truncated]\" marker names the get_page recovery move). 0 forces full text. Unset: subagent tool loops default to the agent.search_snippet_chars config (300; 0=full); every other caller gets full text. (#3800)"
-          },
-          "source_id": {
-            "type": "string",
-            "description": "Scope search to a single source. Defaults to OperationContext.sourceId (set from CLI --source / GBRAIN_SOURCE / .gbrain-source dotfile). Pass '__all__' to span every source for trusted local callers; for remote callers '__all__' spans only your granted sources."
           },
           "salience": {
             "type": "string",
@@ -471,7 +471,7 @@
           },
           "source_id": {
             "type": "string",
-            "description": "v0.34: scope search to a single source. Defaults to OperationContext.sourceId (set from CLI --source / GBRAIN_SOURCE / .gbrain-source dotfile). Pass '__all__' to span every source for trusted local callers; for remote callers '__all__' spans only your granted sources."
+            "description": "v0.34: scope search to a single source. Defaults to OperationContext.sourceId (set from CLI --source / GBRAIN_SOURCE / .gbrain-source dotfile). Pass '__all__' to span every source for trusted local callers. For remote callers, '__all__' uses the same scope as omission: an OAuth grant when present, otherwise the transport-computed federated sources for grantless local stdio."
           },
           "cross_modal": {
             "type": "string",
@@ -1052,6 +1052,10 @@
           "partial": {
             "type": "string",
             "description": "Partial slug or title text to match, e.g. 'alice-ex' or 'meeting notes'. This is the search text param — there is no `text` param."
+          },
+          "source_id": {
+            "type": "string",
+            "description": "Scope resolution to a single source. Defaults to OperationContext.sourceId; when unset, an unqualified resolve spans every federated source (matching search/get_page). Pass '__all__' to span every source for trusted local callers; for remote callers '__all__' spans only your granted sources."
           }
         },
         "required": [

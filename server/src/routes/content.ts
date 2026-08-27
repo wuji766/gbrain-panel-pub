@@ -4,6 +4,29 @@ import type { GbrainClient } from "../gbrain-client";
 
 // 注：slug 可含斜杠（如 notes/m2-test），Hono 的 :slug 只匹配单段，
 // 故四处 slug 路由用 :slug{.+}（TDD 实测：普通 :slug 对 /pages/notes/m2-test 返回 404）。
+
+// 真实 gbrain 的 list_pages/search 返回裸数组（2026-08-27 实测 + docs/discovery.json），
+// 面板 API 统一归一化为 {pages, total}；fake MCP 曾按包装形状实现导致真机列表恒空（M2 BUG-1）。
+function normRows(res: unknown): Record<string, unknown>[] {
+  if (Array.isArray(res)) return res as Record<string, unknown>[];
+  const obj = res as { pages?: unknown; results?: unknown };
+  if (Array.isArray(obj?.pages)) return obj.pages as Record<string, unknown>[];
+  if (Array.isArray(obj?.results)) return obj.results as Record<string, unknown>[];
+  return [];
+}
+
+// 真实 list_pages 行不含 deleted_at（仅 get_page 有），回收站视图需逐行补齐
+async function enrichDeletedAt(client: GbrainClient, rows: Record<string, unknown>[]): Promise<void> {
+  await Promise.all(rows.map(async r => {
+    const slug = typeof r.slug === "string" ? r.slug : "";
+    if (!slug || r.deleted_at) return;
+    try {
+      const d = await client.mcpCall<{ page?: { deleted_at?: string | null } }>("get_page", { slug, include_deleted: true });
+      if (d?.page) r.deleted_at = d.page.deleted_at ?? null;
+    } catch { /* 单行补齐失败不阻塞整个列表 */ }
+  }));
+}
+
 export function contentRoutes(client: GbrainClient) {
   const app = new Hono();
 
@@ -13,13 +36,19 @@ export function contentRoutes(client: GbrainClient) {
     const offset = Number(c.req.query("offset") ?? 0);
     const includeDeleted = c.req.query("include_deleted") === "true";
     try {
-      if (q) return c.json(await client.mcpCall("search", { query: q, limit, offset }));
-      const args: Record<string, unknown> = { limit, offset, include_deleted: includeDeleted };
-      for (const k of ["type", "tag", "sort", "updated_after"] as const) {
-        const v = c.req.query(k);
-        if (v) args[k] = v;
+      let res: unknown;
+      if (q) res = await client.mcpCall("search", { query: q, limit, offset });
+      else {
+        const args: Record<string, unknown> = { limit, offset, include_deleted: includeDeleted };
+        for (const k of ["type", "tag", "sort", "updated_after"] as const) {
+          const v = c.req.query(k);
+          if (v) args[k] = v;
+        }
+        res = await client.mcpCall("list_pages", args);
       }
-      return c.json(await client.mcpCall("list_pages", args));
+      const rows = normRows(res);
+      if (!q && includeDeleted) await enrichDeletedAt(client, rows);
+      return c.json({ pages: rows, total: (res as { total?: number })?.total ?? rows.length });
     } catch (e) { return c.json({ error: String(e) }, 502); }
   });
 
@@ -63,8 +92,18 @@ export function contentRoutes(client: GbrainClient) {
     if (entity) args.entity = entity;
     const grep = c.req.query("grep");
     if (grep) args.grep = grep;
-    try { return c.json(await client.mcpCall("recall", args)); }
-    catch (e) { return c.json({ error: String(e) }, 502); }
+    try {
+      // 真实 recall 行无 expired 布尔（只有 expired_at/valid_until，M2 BUG-2 实测），统一补上供前端直接分支
+      const res = await client.mcpCall<{ facts?: Record<string, unknown>[]; total?: number } | Record<string, unknown>[]>("recall", args);
+      const rows = (Array.isArray(res) ? res : (res.facts ?? [])) as Record<string, unknown>[];
+      const now = Date.now();
+      const facts = rows.map(f => ({
+        ...f,
+        expired: f.expired === true || Boolean(f.expired_at)
+          || (typeof f.valid_until === "string" && !Number.isNaN(Date.parse(f.valid_until)) && Date.parse(f.valid_until) < now),
+      }));
+      return c.json({ facts, total: (Array.isArray(res) ? undefined : res.total) ?? facts.length });
+    } catch (e) { return c.json({ error: String(e) }, 502); }
   });
 
   app.post("/facts", async c => {

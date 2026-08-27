@@ -4,7 +4,7 @@ import { ref, onMounted, h } from "vue";
 import { NInput, NButton, NDataTable, NCheckbox, NModal, NSelect, useMessage } from "naive-ui";
 import { api } from "../api/client";
 
-interface Fact { fact_id?: string; id?: string; entity_slug?: string; entity?: string; fact?: string; kind?: string; visibility?: string; expired?: boolean }
+interface Fact { fact_id?: string; id?: string; entity_slug?: string; entity?: string; fact?: string; kind?: string; visibility?: string; expired?: boolean; expired_at?: string | null; valid_until?: string | null }
 
 const message = useMessage();
 const facts = ref<Fact[]>([]);
@@ -19,6 +19,9 @@ const showNew = ref(false);
 const newFact = ref("");
 const newEntity = ref("");
 const newKind = ref<string | null>(null);
+// 枚举与 remember op 定义一致（docs/discovery.json）
+// 可见性不提供选择：gbrain 对远程调用方（面板即远程）只返回 world 记忆，
+// 选 private 会造成「创建成功但面板永远看不到」的陷阱（2026-08-27 复验实测），等 gbrain 上游支持后再开放
 const kindOptions = [
   { label: "event（事件）", value: "event" }, { label: "preference（偏好）", value: "preference" },
   { label: "commitment（承诺）", value: "commitment" }, { label: "belief（信念）", value: "belief" },
@@ -50,9 +53,13 @@ async function submitForget() {
 async function createFact() {
   if (!newFact.value.trim()) { message.warning("内容必填"); return false; }
   try {
-    await api("/facts", { method: "POST", body: JSON.stringify({ fact: newFact.value.trim(), ...(newEntity.value.trim() ? { entity: newEntity.value.trim() } : {}), ...(newKind.value ? { kind: newKind.value } : {}) }) });
+    await api("/facts", { method: "POST", body: JSON.stringify({
+      fact: newFact.value.trim(),
+      ...(newEntity.value.trim() ? { entity: newEntity.value.trim() } : {}),
+      ...(newKind.value ? { kind: newKind.value } : {}),
+    }) });
     message.success("已记住");
-    newFact.value = ""; showNew.value = false;
+    newFact.value = ""; newKind.value = null; showNew.value = false;
     await load();
   } catch (e) { message.error(String(e)); return false; }
 }
@@ -67,7 +74,9 @@ const columns = [
   { title: "内容", key: "fact", render: (f: Fact) => f.fact ?? "" },
   { title: "类型", key: "kind", render: (f: Fact) => f.kind ?? "" },
   { title: "可见性", key: "visibility", render: (f: Fact) => f.visibility ?? "" },
-  { title: "状态", key: "expired", render: (f: Fact) => f.expired ? "已过期" : "生效中" },
+  { title: "状态", key: "expired", render: (f: Fact) => f.expired
+      ? `已过期${f.expired_at ? "（" + f.expired_at.slice(0, 19).replace("T", " ") + "）" : ""}`
+      : "生效中" },
   { title: "操作", key: "actions", render: (f: Fact) => (!f.expired ? hForget(f) : "") },
 ];
 
@@ -94,7 +103,7 @@ onMounted(load);
       <NInput v-model:value="newFact" type="textarea" placeholder="记忆内容（必填）" :rows="3" />
       <div style="display:flex; gap:8px; margin-top:8px">
         <NInput v-model:value="newEntity" placeholder="实体（可选，如 people/alice）" />
-        <NSelect v-model:value="newKind" :options="kindOptions" placeholder="类型（可选）" clearable style="width: 200px" />
+        <NSelect v-model:value="newKind" :options="kindOptions" placeholder="类型（可选，默认 fact）" clearable style="width: 200px" />
       </div>
     </NModal>
   </div>

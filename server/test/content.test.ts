@@ -37,21 +37,23 @@ describe("内容路由 /api/pages", () => {
     expect(res.status).toBe(400);
   });
 
-  test("?q= 走 search", async () => {
+  test("?q= 走 search（面板统一归一化为 {pages,total}）", async () => {
     const { panelPort } = await boot();
     const json = await (await fetch(`http://127.0.0.1:${panelPort}/api/pages?q=seed`)).json() as any;
-    expect(Array.isArray(json.results)).toBe(true);
-    expect(json.results.length).toBeGreaterThan(0);
+    expect(Array.isArray(json.pages)).toBe(true);
+    expect(json.pages.length).toBeGreaterThan(0);
   });
 
-  test("软删 → 回收站可见 → 恢复", async () => {
+  test("软删 → 回收站可见（含 deleted_at）→ 恢复", async () => {
     const { panelPort } = await boot();
     await fetch(`http://127.0.0.1:${panelPort}/api/pages/notes/m2-test`, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ content: "x" }) });
     await fetch(`http://127.0.0.1:${panelPort}/api/pages/notes/m2-test`, { method: "DELETE" });
     const alive = await (await fetch(`http://127.0.0.1:${panelPort}/api/pages`)).json() as any;
     expect(alive.pages.some((p: { slug: string }) => p.slug === "notes/m2-test")).toBe(false);
     const recycled = await (await fetch(`http://127.0.0.1:${panelPort}/api/pages?include_deleted=true`)).json() as any;
-    expect(recycled.pages.some((p: { slug: string }) => p.slug === "notes/m2-test")).toBe(true);
+    const row = recycled.pages.find((p: { slug: string }) => p.slug === "notes/m2-test");
+    expect(row).toBeTruthy();
+    expect(row.deleted_at).toBeTruthy();
     const restore = await fetch(`http://127.0.0.1:${panelPort}/api/pages/notes/m2-test/restore`, { method: "POST" });
     expect(restore.status).toBe(200);
     const again = await (await fetch(`http://127.0.0.1:${panelPort}/api/pages`)).json() as any;
@@ -81,7 +83,9 @@ describe("内容路由 /api/facts", () => {
     const okRes = await fetch(`http://127.0.0.1:${panelPort}/api/facts/${created.id}/forget`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ reason: "清理测试" }) });
     expect(okRes.status).toBe(200);
     const after = await (await fetch(`http://127.0.0.1:${panelPort}/api/facts?entity=m2-entity&include_expired=true`)).json() as any;
-    expect(after.facts.find((f: { fact_id: string }) => f.fact_id === created.id).expired).toBe(true);
+    const afterRow = after.facts.find((f: { fact_id: string }) => f.fact_id === created.id);
+    expect(afterRow.expired).toBe(true);       // 服务端由 expired_at 归一化出的布尔（真实 recall 行无此字段）
+    expect(afterRow.expired_at).toBeTruthy();
   });
 
   test("缺 fact → 400", async () => {
@@ -96,5 +100,15 @@ describe("/api/full-stats", () => {
     const { panelPort } = await boot();
     const res = await fetch(`http://127.0.0.1:${panelPort}/api/full-stats`);
     expect([200, 502]).toContain(res.status);
+  });
+});
+
+describe("/api/update-check", () => {
+  test("返回 current/latest/networkError 形状；网络不可达时不报 5xx", async () => {
+    const { panelPort } = await boot();
+    const res = await fetch(`http://127.0.0.1:${panelPort}/api/update-check`);
+    expect(res.status).toBe(200);
+    const json = await res.json() as any;
+    expect(["current", "latest", "networkError", "upToDate", "checkedAt"].every(k => k in json)).toBe(true);
   });
 });

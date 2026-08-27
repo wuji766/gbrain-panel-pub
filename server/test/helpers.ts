@@ -55,7 +55,7 @@ export async function startFakeGbrain(opts: {
 
 export async function bootPanelWithFake(mode: "healthy" | "foreign", token: string) {
   const fake = await startFakeGbrain({ mode, token });
-  const cfg: PanelConfig = { gbrainBin: "", gbrainHome: "", panelPort: 0, gbrainPort: fake.port, bootstrapToken: token, backupDir: "", backupRetention: 5 };
+  const cfg: PanelConfig = { gbrainBin: "", gbrainHome: "", panelPort: 0, gbrainPort: fake.port, bootstrapToken: token, backupDir: "", backupRetention: 5, updateProxy: "", updateUrl: "http://127.0.0.1:9/VERSION" };
   const orch = new Orchestrator(cfg, { spawnSpec: { bin: "unused", baseArgs: [] } });
   await orch.start();
   const client = new GbrainClient(orch.getEffectivePort(), token);

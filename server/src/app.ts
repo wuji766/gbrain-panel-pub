@@ -36,6 +36,38 @@ export function createApp(deps: { cfg: PanelConfig; orch: Orchestrator; client: 
     catch (e) { return c.json({ error: String(e) }, 502); }
   });
 
+  // 检查更新：当前版本解析自 serve 启动横幅日志，最新版本与 gbrain check-update 同源
+  // （raw.githubusercontent 上的 VERSION 文件，gbrain 自身直连可通；失败可用 config.updateProxy 兜底）
+  app.get("/api/update-check", async c => {
+    const banner = [...orch.getRecentLogs()].reverse().find(l => /GBrain MCP Server v[\d.]+/.test(l));
+    const current = banner?.match(/GBrain MCP Server v(\d+(?:\.\d+)*)/)?.[1] ?? null;
+    const parseVersion = (body: string): string | null => {
+      const first = body.slice(0, 256).trim().split("\n")[0].trim();
+      return first.match(/^v?(\d+\.\d+\.\d+(?:\.\d+)?)/)?.[1] ?? null;
+    };
+    let latest: string | null = null;
+    let networkError: string | null = null;
+    try {
+      const res = await fetch(cfg.updateUrl, { signal: AbortSignal.timeout(5_000), headers: { "User-Agent": "gbrain-panel" } });
+      if (res.ok) latest = parseVersion(await res.text());
+    } catch (e) {
+      if (cfg.updateProxy) {
+        try {
+          const res = await fetch(cfg.updateUrl, {
+            signal: AbortSignal.timeout(5_000),
+            proxy: cfg.updateProxy,
+          } as RequestInit & { proxy?: string });
+          if (res.ok) latest = parseVersion(await res.text());
+        } catch (e2) { networkError = String(e2); }
+      } else networkError = String(e);
+    }
+    return c.json({
+      current, latest, networkError,
+      checkedAt: new Date().toISOString(),
+      upToDate: current && latest ? current >= latest : null,
+    });
+  });
+
   app.route("/api", contentRoutes(client));
 
   // 静态托管 web/dist（SPA 回退）；无 dist 时给出可读提示
