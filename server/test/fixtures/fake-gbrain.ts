@@ -71,7 +71,7 @@ if (mode === "hang") {
           case "list_pages": {
             // 真实形状：裸数组，行 = {slug, source_id, type, title, updated_at}（无 deleted_at、无 total）
             const all = [...pages.values()].filter(p => (a.include_deleted ? true : !p.deletedAt) && (!a.type || p.type === a.type));
-            if (a.sort === "updated") all.sort((x, y) => y.updatedAt.localeCompare(x.updatedAt));
+            if (a.sort === "updated" || a.sort === "updated_desc") all.sort((x, y) => y.updatedAt.localeCompare(x.updatedAt));
             const offset = a.offset ?? 0, limit = a.limit ?? 50;
             return ok(all.slice(offset, offset + limit).map(p => ({ slug: p.slug, source_id: "default", type: p.type, title: p.title, updated_at: p.updatedAt })));
           }

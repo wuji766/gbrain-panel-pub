@@ -16,7 +16,7 @@ const loading = ref(false);
 async function load() {
   loading.value = true;
   try {
-    const params = new URLSearchParams({ limit: "100", sort: "updated" });
+    const params = new URLSearchParams({ limit: "100", sort: "updated_desc" });
     if (typeFilter.value.trim()) params.set("type", typeFilter.value.trim());
     const json = await api<{ pages?: Row[] }>(`/pages?${params}`);
     rows.value = json.pages ?? [];

@@ -35,7 +35,7 @@ function pushEdge(e: GEdge) {
 async function seed() {
   loading.value = true;
   try {
-    const params = new URLSearchParams({ limit: "30", sort: "updated" });
+    const params = new URLSearchParams({ limit: "30", sort: "updated_desc" });
     if (filterType.value.trim()) params.set("type", filterType.value.trim());
     // 防御式消费（与 Pages.vue 一致）：面板 /api/pages 已归一化为 {pages,total}，
     // 但兼容裸数组/results（M2 BUG-1 教训：形状不符时静默清空）。
