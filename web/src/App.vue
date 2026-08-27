@@ -21,7 +21,8 @@ const nav = [
   { to: "/pages", label: "页面库" },
   { to: "/facts", label: "记忆库" },
   { to: "/capture", label: "快速记事" },
-  { to: "/m3", label: "图谱 · 时间线 · 回收站（M3）", disabled: true },
+  { to: "/graph", label: "知识图谱" },
+  { to: "/timeline", label: "时间线（M3）", disabled: true },
   { to: "/m4", label: "运维 · 维护（M4）", disabled: true },
 ];
 </script>
