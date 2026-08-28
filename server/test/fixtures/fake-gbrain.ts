@@ -65,8 +65,42 @@ if (mode === "hang") {
       if (url.pathname === "/admin/api/health-indicators") {
         return Response.json({ status: "ok", checks: [{ name: "db", ok: true }] });
       }
+      if (url.pathname === "/admin/api/requests") {
+        // 真实形状：{rows,total,page,pages}，行含 token_name/agent_name/operation/latency_ms/status 等
+        return Response.json({
+          rows: [{ id: 1, token_name: "gbrain-panel", agent_name: "gbrain-panel", operation: "list_pages", latency_ms: 12, status: "success", params: "{}", error_message: null, created_at: "2026-08-28T00:00:00Z" }],
+          total: 1, page: 1, pages: 1,
+        });
+      }
+      if (url.pathname === "/admin/api/jobs/watch") {
+        // 固定快照：by_type 一项 / queue_health 全 0 / top_errors、budget_owners 空数组
+        return Response.json({
+          by_type: [{ type: "sync", waiting: 0, active: 0, failed: 0, completed: 1 }],
+          queue_health: { depth: 0, oldest_age_s: 0, workers: 0, wedged: false },
+          top_errors: [],
+          budget_owners: [],
+        });
+      }
+      if (url.pathname === "/admin/api/agents") {
+        // 真实形状：裸数组，oauth 与 api_key 认证各一条
+        return Response.json([
+          { name: "web", auth: "oauth", client_id: "web-client", created_at: "2026-08-01T00:00:00Z", last_seen_at: "2026-08-28T00:00:00Z", active: true },
+          { name: "gbrain-panel", auth: "api_key", key_count: 1, created_at: "2026-08-20T00:00:00Z", last_seen_at: "2026-08-28T00:00:00Z", active: true },
+        ]);
+      }
       if (url.pathname === "/admin/api/api-keys" && req.method === "POST") {
-        return Response.json({ key: "fake-api-key-123", name: (await req.json().catch(() => ({}))).name ?? "" });
+        // 真实形状：{name,token,id}（token 一次性，仅签发响应可见）
+        return Response.json({ name: (await req.json().catch(() => ({}))).name ?? "", token: "fake-one-time-token-456", id: 1 });
+      }
+      if (url.pathname === "/admin/api/api-keys/revoke" && req.method === "POST") {
+        return Response.json({ revoked: true });
+      }
+      if (url.pathname === "/admin/events") {
+        // 最小 SSE：握手头 + ": connected" 注释行后挂起不关闭（真实端点持续推送运维事件）
+        const encoder = new TextEncoder();
+        return new Response(new ReadableStream({
+          start(c) { c.enqueue(encoder.encode(": connected\n\n")); /* 保持不关闭 */ },
+        }), { headers: { "content-type": "text/event-stream", "cache-control": "no-cache", connection: "keep-alive" } });
       }
       if (url.pathname === "/mcp" && req.method === "POST") {
         const body = await req.json();

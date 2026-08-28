@@ -63,10 +63,26 @@ export class GbrainClient {
       }));
   }
 
+  // 原始 fetch（带 cookie 会话）：供 SSE 等流式响应透传。401 重登一次（同 withSession 语义），
+  // 但返回 Response 本身且不解析/不因非 2xx 抛错——错误处理交由调用方（如 SSE 路由的 502 分支）。
+  async adminFetchRaw(path: string): Promise<Response> {
+    const doFetch = (cookie: string | null) =>
+      fetch(this.base() + path, { headers: { ...(cookie ? { cookie: `gbrain_admin=${cookie}` } : {}) } });
+    let res = await doFetch(this.cookie);
+    if (res.status === 401) {
+      this.cookie = null;
+      await this.ensureSession();
+      res = await doFetch(this.cookie);
+    }
+    return res;
+  }
+
   async issueApiKey(name: string): Promise<string> {
-    // 响应字段形状由 discovery（规格 §9.2）确认，这里兼容三种常见命名
-    const json = await this.adminPost<Record<string, unknown> | undefined>("/admin/api/api-keys", { name });
-    const key = (json?.key ?? json?.api_key ?? json?.token) as string | undefined;
+    // 同名先撤销（源码：revoke 按 name 撤所有 active 行；先撤后签防累积，冷启动至多 1 条 active）
+    await this.adminPost("/admin/api/api-keys/revoke", { name }).catch(() => null);
+    // 响应字段形状由 discovery（规格 §9.2）确认：真实返回 {name,token,id}，token 优先，兼容三种命名
+    const json = await this.adminPost<Record<string, unknown>>("/admin/api/api-keys", { name });
+    const key = (json.token ?? json.key ?? json.api_key) as string | undefined;
     if (!key) throw new Error(`api-keys 响应无 key 字段: ${JSON.stringify(json)}`);
     return key;
   }
