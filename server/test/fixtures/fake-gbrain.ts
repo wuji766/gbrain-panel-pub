@@ -13,6 +13,10 @@ const facts = new Map<string, FakeFact>();
 const links = [{ from: "notes/seed-1", to: "people/alice", type: "note" }, { from: "people/alice", to: "notes/seed-2", type: "note" }];
 // op 计数（键=MCP op 名）+ admin 路径计数（键=`METHOD path`），仅测试断言用，经 GET /__calls 读取
 const opCounts: Record<string, number> = {};
+// api-keys 状态机：GET 列表 / POST 签发 / POST revoke 共享同一份模块级列表（每个 fake 进程独立）
+interface FakeApiKey { id: string; name: string; created_at: string; last_used_at: string | null; status: "active" | "revoked" }
+const apiKeys: FakeApiKey[] = [{ id: "k1", name: "gbrain-panel", created_at: "2026-08-26T00:00:00Z", last_used_at: null, status: "active" }];
+let keySeq = 1;
 let factSeq = 100;
 function seed(): void {
   pages.set("notes/seed-1", { slug: "notes/seed-1", title: "种子页一", type: "note", content: "# 种子页一\n\n内容", deletedAt: null, updatedAt: "2026-08-20T00:00:00Z" });
@@ -73,26 +77,40 @@ if (mode === "hang") {
         });
       }
       if (url.pathname === "/admin/api/jobs/watch") {
-        // 固定快照：by_type 一项 / queue_health 全 0 / top_errors、budget_owners 空数组
+        // 真实形状（源码 jobs-watch.ts WatchSnapshot）：ts_ms 快照时间 + by_type(name/total/completed/failed/dead)
+        // + queue_health(waiting/active/stalled) + lease_pressure_1h + top_errors(cluster/count) + budget_owners
         return Response.json({
-          by_type: [{ type: "sync", waiting: 0, active: 0, failed: 0, completed: 1 }],
-          queue_health: { depth: 0, oldest_age_s: 0, workers: 0, wedged: false },
-          top_errors: [],
-          budget_owners: [],
+          ts_ms: Date.now(),
+          by_type: [{ name: "embed", total: 3, completed: 2, failed: 1, dead: 0 }],
+          queue_health: { waiting: 0, active: 0, stalled: 0 },
+          lease_pressure_1h: 0,
+          top_errors: [{ cluster: "TimeoutError: embed", count: 1 }],
+          budget_owners: [{ owner_id: "panel-test", remaining_cents: 100, total_spent_cents: 5 }],
         });
       }
       if (url.pathname === "/admin/api/agents") {
-        // 真实形状：裸数组，oauth 与 api_key 认证各一条
+        // 真实形状（源码 serve-http.ts /admin/api/agents）：裸数组，oauth 客户端与 api_key 混排，
+        // 行 = {id,name,auth_type,grant_types,scope,source_id,federated_read,created_at,token_ttl,status,last_used_at,total_requests,requests_today}
         return Response.json([
-          { name: "web", auth: "oauth", client_id: "web-client", created_at: "2026-08-01T00:00:00Z", last_seen_at: "2026-08-28T00:00:00Z", active: true },
-          { name: "gbrain-panel", auth: "api_key", key_count: 1, created_at: "2026-08-20T00:00:00Z", last_seen_at: "2026-08-28T00:00:00Z", active: true },
+          { id: "uuid-1", name: "zcode-main", auth_type: "oauth", grant_types: "client_credentials", scope: "read write", source_id: null, federated_read: false, created_at: "2026-08-01T00:00:00Z", token_ttl: 3600, status: "active", last_used_at: "2026-08-28T00:00:00Z", total_requests: 42, requests_today: 5 },
+          { id: "uuid-2", name: "gbrain-panel", auth_type: "api_key", grant_types: null, scope: "read write admin", source_id: null, federated_read: false, created_at: "2026-08-26T00:00:00Z", token_ttl: null, status: "active", last_used_at: null, total_requests: 10, requests_today: 2 },
         ]);
       }
+      if (url.pathname === "/admin/api/api-keys" && req.method === "GET") {
+        // 真实形状（源码 serve-http.ts）：裸数组 {id,name,created_at,last_used_at,status}，按 created_at 倒序
+        return Response.json([...apiKeys].sort((a, b) => b.created_at.localeCompare(a.created_at)));
+      }
       if (url.pathname === "/admin/api/api-keys" && req.method === "POST") {
-        // 真实形状：{name,token,id}（token 一次性，仅签发响应可见）
-        return Response.json({ name: (await req.json().catch(() => ({}))).name ?? "", token: "fake-one-time-token-456", id: 1 });
+        // 真实形状：{name,token,id}（token 一次性，仅签发响应可见）；同时入列表，与 GET 形成一致状态机
+        const name = ((await req.json().catch(() => ({}))) as { name?: string }).name ?? "";
+        const id = `k${++keySeq}`;
+        apiKeys.push({ id, name, created_at: new Date().toISOString(), last_used_at: null, status: "active" });
+        return Response.json({ name, token: "fake-one-time-token-456", id });
       }
       if (url.pathname === "/admin/api/api-keys/revoke" && req.method === "POST") {
+        // 源码语义：按 name 撤所有 active 行
+        const name = ((await req.json().catch(() => ({}))) as { name?: string }).name ?? "";
+        for (const k of apiKeys) if (k.name === name && k.status === "active") k.status = "revoked";
         return Response.json({ revoked: true });
       }
       if (url.pathname === "/admin/events") {

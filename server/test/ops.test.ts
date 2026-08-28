@@ -23,11 +23,14 @@ describe("运维路由", () => {
     expect(json.total).toBe(1);
   }, 15000);
 
-  test("jobs 透传含 by_type/queue_health", async () => {
+  test("jobs 透传含 ts_ms/by_type/queue_health（WatchSnapshot 真实形状）", async () => {
     const { panelPort } = await boot();
     const json = await (await fetch(`http://127.0.0.1:${panelPort}/api/ops/jobs`)).json() as any;
+    expect(typeof json.ts_ms).toBe("number");
     expect(Array.isArray(json.by_type)).toBe(true);
-    expect(json.queue_health).toBeTruthy();
+    expect(json.by_type[0]).toMatchObject({ name: "embed", total: 3, completed: 2, failed: 1, dead: 0 });
+    expect(json.queue_health).toMatchObject({ waiting: 0, active: 0, stalled: 0 });
+    expect(typeof json.lease_pressure_1h).toBe("number");
   }, 15000);
 
   test("agents 裸数组透传", async () => {
@@ -35,14 +38,24 @@ describe("运维路由", () => {
     const json = await (await fetch(`http://127.0.0.1:${panelPort}/api/ops/agents`)).json() as any;
     expect(Array.isArray(json)).toBe(true);
     expect(json.length).toBe(2);
+    expect(json[0]).toMatchObject({ id: "uuid-1", name: "zcode-main", auth_type: "oauth", status: "active" });
+    expect(json[1]).toMatchObject({ id: "uuid-2", name: "gbrain-panel", auth_type: "api_key", status: "active" });
   }, 15000);
 
   test("api-keys：GET 列表 / POST 签发返回一次性 token / revoke", async () => {
     const { panelPort } = await boot();
+    const list = await (await fetch(`http://127.0.0.1:${panelPort}/api/ops/api-keys`)).json() as any;
+    expect(Array.isArray(list)).toBe(true);
+    expect(list.some((k: any) => k.name === "gbrain-panel" && k.status === "active")).toBe(true);
     const created = await (await fetch(`http://127.0.0.1:${panelPort}/api/ops/api-keys`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name: "manual-test" }) })).json() as any;
     expect(created.token).toBeTruthy();
     const revoked = await (await fetch(`http://127.0.0.1:${panelPort}/api/ops/api-keys/revoke`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name: "manual-test" }) })).json() as any;
     expect(revoked.revoked).toBe(true);
+    // 状态机一致性：revoke 后 GET 列表中同名条目应变为 revoked
+    const after = await (await fetch(`http://127.0.0.1:${panelPort}/api/ops/api-keys`)).json() as any;
+    const manual = after.filter((k: any) => k.name === "manual-test");
+    expect(manual.length).toBeGreaterThanOrEqual(1);
+    expect(manual.every((k: any) => k.status === "revoked")).toBe(true);
   }, 15000);
 
   test("key 自清理：issueApiKey 先 revoke 同名（fake 计数验证）", async () => {
