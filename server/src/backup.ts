@@ -9,8 +9,19 @@ import { join } from "node:path";
 import type { PanelConfig } from "./config";
 import type { Orchestrator } from "./orchestrator";
 import type { GbrainClient } from "./gbrain-client";
+import { readLockStatus } from "./stale-lock";
 
 export interface BackupInfo { name: string; sizeBytes: number; createdAt: string }
+
+// 源码定论的备份排除清单（恢复安全）：sock（EACCES 元凶）、lock 簇（恢复后判活锁）、
+// postmaster.pid（恢复后判 unclean shutdown）。.gbrain-ipc-secret 保留（持久密钥）。
+export function isRuntimeArtifact(src: string): boolean {
+  const base = src.split(/[\\/]/).pop() ?? "";
+  if (base === ".gbrain-resolve.sock" || base === "postmaster.pid") return true;
+  if (base.endsWith(".lock-reap.json")) return true;
+  if (base.startsWith(".gbrain-lock")) return true; // .gbrain-lock/ 与 .gbrain-lock.reap-claim
+  return false;
+}
 
 // 目录名固定 gbrain-backup-YYYYMMDD-HHMMSS（UTC），remove/列表均按此白名单校验，防路径注入
 const NAME_RE = /^gbrain-backup-\d{8}-\d{6}$/;
@@ -26,7 +37,7 @@ export class BackupManager {
     if (!existsSync(this.deps.cfg.backupDir)) return [];
     return readdirSync(this.deps.cfg.backupDir)
       .filter(d => NAME_RE.test(d))
-      .map(d => {
+      .flatMap((d): BackupInfo[] => {
         const p = join(this.deps.cfg.backupDir, d);
         let size = 0;
         const walk = (dir: string) => {
@@ -35,8 +46,13 @@ export class BackupManager {
             if (f.isDirectory()) walk(fp); else size += statSync(fp).size;
           }
         };
-        try { walk(p); } catch { /* 单文件失败忽略，列表不因此报错 */ }
-        return { name: d, sizeBytes: size, createdAt: statSync(p).mtime.toISOString() };
+        try {
+          walk(p);
+          return [{ name: d, sizeBytes: size, createdAt: statSync(p).mtime.toISOString() }];
+        } catch {
+          // 竞态：统计途中条目被删/变更（statSync/walk 均可能抛）——跳过该条，列表不因此报错
+          return [];
+        }
       })
       .sort((a, b) => b.name.localeCompare(a.name)); // 名称含时间戳，倒序 = 最新在前
   }
@@ -58,6 +74,12 @@ export class BackupManager {
       await this.deps.orch.killServe();
       // Windows 句柄释放竞态：killServe 后文件句柄可能尚未释放，立即复制易撞 EBUSY/EPERM
       await new Promise(r => setTimeout(r, 300));
+      const lock = readLockStatus(this.deps.cfg.gbrainHome);
+      if (lock.present && !lock.stale) {
+        // killServe 后本不应有新鲜心跳——存在即外部 serve 抢占持锁，复制会得到不一致快照
+        await this.deps.orch.start().catch(() => null); // best-effort 拉回（大概率 attached）
+        throw new Error("检测到活跃锁——疑似外部 serve 已抢占，已中止复制（源数据未被修改）");
+      }
       const ts = new Date().toISOString().slice(0, 19).replace(/[-:T]/g, "").replace(/^(\d{8})(\d{6})$/, "$1-$2");
       const name = `gbrain-backup-${ts}`;
       const dest = join(this.deps.cfg.backupDir, name);
@@ -65,6 +87,8 @@ export class BackupManager {
         mkdirSync(this.deps.cfg.backupDir, { recursive: true });
         await this.copyDataDir(join(this.deps.cfg.gbrainHome, ".gbrain"), dest);
       } catch (e) {
+        // 残缺备份目录不留档：半份快照恢复出来是脏数据，且 sock 等工件未被排除时残件难删
+        try { rmSync(dest, { recursive: true, force: true }); } catch { /* 清理失败不掩盖原错误 */ }
         // best-effort 恢复 serve：cpSync 已抛错（磁盘满/EBUSY/ENOENT 等）时 serve 仍被杀着，
         // 不重启则面板所有数据接口 502 直到面板进程重启为止
         let restart: string;
@@ -82,15 +106,16 @@ export class BackupManager {
     }
   }
 
-  /** 复制数据目录：撞 EBUSY/EPERM（句柄竞态）时等 300ms 重试一次（仅一次），仍失败上抛进入 catch 恢复逻辑 */
+  /** 复制数据目录：filter 排除运行时工件（sock/lock 簇/postmaster.pid）；
+   *  撞 EBUSY/EPERM（句柄竞态）时等 300ms 重试一次（仅一次），仍失败上抛进入 catch 恢复逻辑 */
   private async copyDataDir(src: string, dest: string): Promise<void> {
     try {
-      cpSync(src, dest, { recursive: true });
+      cpSync(src, dest, { recursive: true, filter: (src) => !isRuntimeArtifact(src) });
     } catch (e) {
       const code = (e as { code?: string }).code;
       if (code !== "EBUSY" && code !== "EPERM") throw e;
       await new Promise(r => setTimeout(r, 300));
-      cpSync(src, dest, { recursive: true });
+      cpSync(src, dest, { recursive: true, filter: (src) => !isRuntimeArtifact(src) });
     }
   }
 

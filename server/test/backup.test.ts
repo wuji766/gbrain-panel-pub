@@ -1,5 +1,5 @@
 import { describe, test, expect, beforeEach, afterEach } from "bun:test";
-import { mkdtempSync, rmSync, mkdirSync, writeFileSync, existsSync, readdirSync } from "node:fs";
+import { mkdtempSync, rmSync, mkdirSync, writeFileSync, existsSync, readdirSync, utimesSync } from "node:fs";
 import { join } from "node:path";
 import { BackupManager } from "../src/backup";
 import type { Orchestrator } from "../src/orchestrator";
@@ -74,5 +74,56 @@ describe("BackupManager", () => {
     const r = await bm.run();
     expect(r.name).toMatch(/^gbrain-backup-/);
     expect(started).toBeGreaterThanOrEqual(1);
+  });
+});
+
+describe("备份排除运行时工件与安全检查", () => {
+  test("filter 排除 sock/lock 簇/postmaster.pid，保留其余", async () => {
+    // 种子目录（beforeEach 已建 .gbrain/brain.pglite/PG_VERSION）补工件
+    writeFileSync(join(home, ".gbrain", "brain.pglite", ".gbrain-resolve.sock"), "x");
+    mkdirSync(join(home, ".gbrain", "brain.pglite", ".gbrain-lock"), { recursive: true });
+    writeFileSync(join(home, ".gbrain", "brain.pglite", ".gbrain-lock", "lock"), "{}");
+    // 本用例只验 filter 排除：锁簇 mtime 回拨为 stale，避免触发"复制前活锁检查"中止
+    // （新鲜锁会命中活锁检查——那是下一个用例的语义，二者须互斥可辨）
+    const stale = new Date(Date.now() - 120_000);
+    utimesSync(join(home, ".gbrain", "brain.pglite", ".gbrain-lock", "lock"), stale, stale);
+    writeFileSync(join(home, ".gbrain", "brain.pglite", "postmaster.pid"), "1234");
+    writeFileSync(join(home, ".gbrain", "brain.pglite", ".gbrain-ipc-secret"), "abc");
+    const bm = new BackupManager({ cfg: cfg(), orch: fakeOrch("own"), client: fakeClient });
+    const r = await bm.run();
+    const dest = join(backupDir, r.name);
+    expect(existsSync(join(dest, "brain.pglite", "PG_VERSION"))).toBe(true);
+    expect(existsSync(join(dest, "brain.pglite", ".gbrain-ipc-secret"))).toBe(true);   // 保留
+    expect(existsSync(join(dest, "brain.pglite", ".gbrain-resolve.sock"))).toBe(false); // 排除
+    expect(existsSync(join(dest, "brain.pglite", ".gbrain-lock"))).toBe(false);         // 排除
+    expect(existsSync(join(dest, "brain.pglite", "postmaster.pid"))).toBe(false);       // 排除
+  });
+
+  test("复制前活锁（新鲜心跳）→ 中止且不产生备份", async () => {
+    const lockDir = join(home, ".gbrain", "brain.pglite", ".gbrain-lock");
+    mkdirSync(lockDir, { recursive: true });
+    writeFileSync(join(lockDir, "lock"), "{}"); // mtime=now → 新鲜
+    const bm = new BackupManager({ cfg: cfg(), orch: fakeOrch("own"), client: fakeClient });
+    await expect(bm.run()).rejects.toThrow(/活跃锁|外部 serve/);
+    const dirs = readdirSync(backupDir).filter(d => d.startsWith("gbrain-backup-"));
+    expect(dirs.length).toBe(0);
+  });
+
+  test("stale 锁（死残留）不阻断备份", async () => {
+    const lockDir = join(home, ".gbrain", "brain.pglite", ".gbrain-lock");
+    mkdirSync(lockDir, { recursive: true });
+    const t = new Date(Date.now() - 120_000);
+    writeFileSync(join(lockDir, "lock"), "{}");
+    utimesSync(join(lockDir, "lock"), t, t);
+    const bm = new BackupManager({ cfg: cfg(), orch: fakeOrch("own"), client: fakeClient });
+    const r = await bm.run();
+    expect(r.name).toMatch(/^gbrain-backup-/);
+  });
+
+  test("复制失败清理残缺目录（源目录不存在 → ENOENT）", async () => {
+    const bm = new BackupManager({ cfg: { ...cfg(), gbrainHome: join(TMP, "no-such-home") }, orch: fakeOrch("own"), client: fakeClient });
+    await expect(bm.run()).rejects.toThrow(/备份复制失败/);
+    const dirs = readdirSync(backupDir).filter(d => d.startsWith("gbrain-backup-"));
+    expect(dirs.length).toBe(0); // 残缺目录已被 catch 清理
   });
 });
