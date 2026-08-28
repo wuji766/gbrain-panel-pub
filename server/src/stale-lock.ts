@@ -27,6 +27,16 @@ function resolveLockDir(gbrainHome: string): string {
   return legacy;
 }
 
+/** 读取锁内 PID（<lockDir>/lock 的 JSON `pid` 字段）。任何失败（无锁目录/无 lock 文件/解析失败/
+ *  字段非整数）返回 null——调用方（备份活锁判据）对 null 采取保守路线（视为外部锁，中止）。 */
+export function readLockPid(gbrainHome: string): number | null {
+  const lockDir = resolveLockDir(gbrainHome);
+  try {
+    const pid = (JSON.parse(readFileSync(join(lockDir, "lock"), "utf8")) as { pid?: unknown }).pid;
+    return typeof pid === "number" && Number.isInteger(pid) ? pid : null;
+  } catch { return null; }
+}
+
 export function readLockStatus(gbrainHome: string, now = Date.now()): LockStatus {
   const lockDir = resolveLockDir(gbrainHome);
   if (!existsSync(lockDir)) return { present: false, stale: false, lockDir };

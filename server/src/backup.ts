@@ -9,7 +9,7 @@ import { join } from "node:path";
 import type { PanelConfig } from "./config";
 import type { Orchestrator } from "./orchestrator";
 import type { GbrainClient } from "./gbrain-client";
-import { readLockStatus } from "./stale-lock";
+import { readLockPid, readLockStatus } from "./stale-lock";
 
 export interface BackupInfo { name: string; sizeBytes: number; createdAt: string }
 
@@ -29,7 +29,11 @@ const NAME_RE = /^gbrain-backup-\d{8}-\d{6}$/;
 export class BackupManager {
   private running = false;
 
-  constructor(private deps: { cfg: PanelConfig; orch: Orchestrator; client: GbrainClient }) {}
+  // copyDir：整个复制动作的测试注入替身（签名对齐调用点：仅 src/dest——filter/重试语义内置于默认实现）
+  constructor(
+    private deps: { cfg: PanelConfig; orch: Orchestrator; client: GbrainClient },
+    private opts: { copyDir?: (src: string, dest: string) => void } = {},
+  ) {}
 
   isRunning(): boolean { return this.running; }
 
@@ -71,14 +75,22 @@ export class BackupManager {
     }
     this.running = true;
     try {
-      await this.deps.orch.killServe();
+      const killedPid = await this.deps.orch.killServe();
       // Windows 句柄释放竞态：killServe 后文件句柄可能尚未释放，立即复制易撞 EBUSY/EPERM
       await new Promise(r => setTimeout(r, 300));
       const lock = readLockStatus(this.deps.cfg.gbrainHome);
       if (lock.present && !lock.stale) {
-        // killServe 后本不应有新鲜心跳——存在即外部 serve 抢占持锁，复制会得到不一致快照
-        await this.deps.orch.start().catch(() => null); // best-effort 拉回（大概率 attached）
-        throw new Error("检测到活跃锁——疑似外部 serve 已抢占，已中止复制（源数据未被修改）");
+        const lockPid = readLockPid(this.deps.cfg.gbrainHome);
+        if (lockPid !== null && killedPid !== null && lockPid === killedPid) {
+          // 自有 serve 的尸锁：taskkill /F 强杀不清锁文件（gbrain 只在优雅退出路径清锁），
+          // mtime 冻结在死前最后一次心跳（30s 一次），90s staleness 窗口内必"新鲜"——mtime 判据
+          // 对自身尸锁必然误报。此 PID 为面板亲手所杀（ESRCH 死亡确凿），放行复制；
+          // 锁目录已被 filter 排除出备份产物，不会带入"恢复后判活锁"问题。
+        } else {
+          // 新鲜心跳且非自己杀掉的 PID——外部 serve 抢占持锁，复制会得到不一致快照
+          await this.deps.orch.start().catch(() => null); // best-effort 拉回（大概率 attached）
+          throw new Error("检测到活跃锁——疑似外部 serve 已抢占，已中止复制（源数据未被修改）");
+        }
       }
       const ts = new Date().toISOString().slice(0, 19).replace(/[-:T]/g, "").replace(/^(\d{8})(\d{6})$/, "$1-$2");
       const name = `gbrain-backup-${ts}`;
@@ -107,8 +119,10 @@ export class BackupManager {
   }
 
   /** 复制数据目录：filter 排除运行时工件（sock/lock 簇/postmaster.pid）；
-   *  撞 EBUSY/EPERM（句柄竞态）时等 300ms 重试一次（仅一次），仍失败上抛进入 catch 恢复逻辑 */
+   *  撞 EBUSY/EPERM（句柄竞态）时等 300ms 重试一次（仅一次），仍失败上抛进入 catch 恢复逻辑。
+   *  opts.copyDir 为整个复制动作的测试替身注入点（替换后不再有 filter/重试语义——注入用例自担）。 */
   private async copyDataDir(src: string, dest: string): Promise<void> {
+    if (this.opts.copyDir) { this.opts.copyDir(src, dest); return; }
     try {
       cpSync(src, dest, { recursive: true, filter: (src) => !isRuntimeArtifact(src) });
     } catch (e) {

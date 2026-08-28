@@ -8,7 +8,8 @@ import type { PanelConfig } from "../src/config";
 
 const TMP = join(import.meta.dir, ".tmp");
 let home: string, backupDir: string;
-const fakeOrch = (state: string) => ({ getState: () => state, killServe: async () => {}, start: async () => "own" as const }) as unknown as Orchestrator;
+// killServe 返回被杀自有 serve 的 pid=1234（活锁判据比对用；无锁/stale 锁的用例不消费该值）
+const fakeOrch = (state: string) => ({ getState: () => state, killServe: async () => 1234, start: async () => "own" as const }) as unknown as Orchestrator;
 const fakeClient = {} as GbrainClient;
 
 beforeEach(() => {
@@ -99,14 +100,27 @@ describe("备份排除运行时工件与安全检查", () => {
     expect(existsSync(join(dest, "brain.pglite", "postmaster.pid"))).toBe(false);       // 排除
   });
 
-  test("复制前活锁（新鲜心跳）→ 中止且不产生备份", async () => {
+  test("外部活锁（新鲜心跳且锁 pid≠被杀 pid）→ 中止且不产生备份", async () => {
     const lockDir = join(home, ".gbrain", "brain.pglite", ".gbrain-lock");
     mkdirSync(lockDir, { recursive: true });
-    writeFileSync(join(lockDir, "lock"), "{}"); // mtime=now → 新鲜
+    // mtime=now → 新鲜；锁内 pid=9999 ≠ killServe 返回的 1234 → 持锁者是外部 serve
+    writeFileSync(join(lockDir, "lock"), JSON.stringify({ pid: 9999, acquired_at: Date.now(), refreshed_at: Date.now(), command: "serve", subcommand: "http" }));
     const bm = new BackupManager({ cfg: cfg(), orch: fakeOrch("own"), client: fakeClient });
     await expect(bm.run()).rejects.toThrow(/活跃锁|外部 serve/);
     const dirs = readdirSync(backupDir).filter(d => d.startsWith("gbrain-backup-"));
     expect(dirs.length).toBe(0);
+  });
+
+  test("自有 serve 尸锁（锁 pid=被杀 pid，mtime 仍新鲜）→ 放行备份", async () => {
+    // 场景：own 态 serve 被 taskkill /F 强杀——不走 gbrain 优雅退出路径，锁文件残留、
+    // mtime 冻结在死前最后一次心跳（心跳 30s 一次），90s staleness 窗口内 mtime 判据必
+    // 误报"活锁"。新判据：锁内 pid === killServe 返回的被杀 pid → 亲手所杀，放行复制。
+    const lockDir = join(home, ".gbrain", "brain.pglite", ".gbrain-lock");
+    mkdirSync(lockDir, { recursive: true });
+    writeFileSync(join(lockDir, "lock"), JSON.stringify({ pid: 1234, acquired_at: Date.now(), refreshed_at: Date.now(), command: "serve", subcommand: "http" })); // mtime=now → 新鲜
+    const bm = new BackupManager({ cfg: cfg(), orch: fakeOrch("own"), client: fakeClient });
+    const r = await bm.run();
+    expect(existsSync(join(backupDir, r.name, "brain.pglite", "PG_VERSION"))).toBe(true);
   });
 
   test("stale 锁（死残留）不阻断备份", async () => {
@@ -120,10 +134,22 @@ describe("备份排除运行时工件与安全检查", () => {
     expect(r.name).toMatch(/^gbrain-backup-/);
   });
 
-  test("复制失败清理残缺目录（源目录不存在 → ENOENT）", async () => {
-    const bm = new BackupManager({ cfg: { ...cfg(), gbrainHome: join(TMP, "no-such-home") }, orch: fakeOrch("own"), client: fakeClient });
+  test("复制失败清理残缺目录（注入 copyDir 半途抛错，dest 已产生）", async () => {
+    // 修 Important-1：旧版"源目录不存在 → ENOENT"是空转覆盖（cpSync 在创建 dest 前就抛错，
+    // dirs.length===0 先验成立，rmSync 清理从未真跑过）。注入 copyDir 制造"mkdir dest +
+    // 写半份文件 + 抛错"，确定性真覆盖 catch 里的 rmSync(dest) 清理与"备份复制失败"语义。
+    const bm = new BackupManager(
+      { cfg: cfg(), orch: fakeOrch("own"), client: fakeClient },
+      {
+        copyDir: (_src, dest) => {
+          mkdirSync(dest, { recursive: true });
+          writeFileSync(join(dest, "half-file"), "x");
+          throw new Error("注入失败");
+        },
+      },
+    );
     await expect(bm.run()).rejects.toThrow(/备份复制失败/);
     const dirs = readdirSync(backupDir).filter(d => d.startsWith("gbrain-backup-"));
-    expect(dirs.length).toBe(0); // 残缺目录已被 catch 清理
+    expect(dirs.length).toBe(0); // 半份 dest 已被 catch 清理
   });
 });
