@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { loadConfig } from "./config";
 import { Orchestrator } from "./orchestrator";
 import { GbrainClient } from "./gbrain-client";
+import { BackupManager } from "./backup";
 import { createApp } from "./app";
 
 const cfgPath = process.env.GBRAIN_PANEL_CONFIG ?? join(import.meta.dir, "..", "..", "config.json");
@@ -36,7 +37,8 @@ if (state === "error") {
 
 // 端口用 getter 构造：fallback 换端口后 client 自动跟随新端口，无需重建
 const client = new GbrainClient(() => orch.getEffectivePort(), cfg.bootstrapToken);
-const app = createApp({ cfg, orch, client });
+const backup = new BackupManager({ cfg, orch, client });
+const app = createApp({ cfg, orch, client, backup });
 
 server = Bun.serve({ port: cfg.panelPort, hostname: "127.0.0.1", fetch: app.fetch });
 console.log(`[panel] http://127.0.0.1:${server.port}`);

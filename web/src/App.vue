@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { onMounted, onUnmounted, computed } from "vue";
-import { NTag, NMessageProvider } from "naive-ui";
+import { NTag, NAlert, NMessageProvider } from "naive-ui";
 import { useConnection } from "./stores/connection";
 
 const conn = useConnection();
@@ -26,7 +26,7 @@ const nav = [
   { to: "/ops/requests", label: "请求日志" },
   { to: "/ops/jobs", label: "任务队列" },
   { to: "/ops/agents", label: "Agents · 密钥" },
-  { to: "/backup", label: "备份（M4）", disabled: true },
+  { to: "/backup", label: "备份" },
   { to: "/config", label: "配置（M4）", disabled: true },
 ];
 </script>
@@ -48,6 +48,9 @@ const nav = [
           <NTag :type="stateType" size="small">
             gbrain: {{ conn.status?.state ?? "…" }} :{{ conn.status?.effectivePort ?? "?" }}
           </NTag>
+          <NAlert v-if="conn.backupRunning" type="warning" :bordered="false" size="small" style="margin-left: 12px">
+            服务暂停中：正在备份 gbrain 数据目录……
+          </NAlert>
         </header>
         <RouterView />
         <div v-if="!conn.online" class="overlay">
@@ -69,7 +72,7 @@ const nav = [
 .nav-item:hover { background: #f3f3f6; }
 .nav-item.disabled { color: #b0b0b8; cursor: not-allowed; }
 .main { flex: 1; position: relative; overflow: auto; }
-.topbar { padding: 12px 20px; border-bottom: 1px solid #e0e0e6; }
+.topbar { display: flex; align-items: center; padding: 12px 20px; border-bottom: 1px solid #e0e0e6; }
 .overlay { position: absolute; inset: 0; background: rgba(255,255,255,.92); display: grid; place-items: center; }
 .overlay-card { text-align: center; }
 </style>

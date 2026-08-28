@@ -8,9 +8,11 @@ import { readLockStatus } from "./stale-lock";
 import { contentRoutes } from "./routes/content";
 import { graphRoutes } from "./routes/graph";
 import { opsRoutes } from "./routes/ops";
+import type { BackupManager } from "./backup";
 
-export function createApp(deps: { cfg: PanelConfig; orch: Orchestrator; client: GbrainClient }) {
-  const { cfg, orch, client } = deps;
+// backup 为可选依赖：未注入（旧测试/最小部署）时 /api/backups* 一律 503，既有 createApp 调用零改动
+export function createApp(deps: { cfg: PanelConfig; orch: Orchestrator; client: GbrainClient; backup?: BackupManager }) {
+  const { cfg, orch, client, backup } = deps;
   const app = new Hono();
 
   app.get("/api/status", c =>
@@ -83,6 +85,21 @@ export function createApp(deps: { cfg: PanelConfig; orch: Orchestrator; client: 
   app.route("/api", graphRoutes(client));
   // 运维路由（requests/jobs/agents/api-keys 透传 + /api/events SSE 代理），仅需 client（无 cfg）
   app.route("/api", opsRoutes(client));
+
+  // 备份路由：列表带 running 字段供前端全局横幅轮询；name 走 BackupManager 白名单校验（防路径注入）
+  app.get("/api/backups", c =>
+    backup ? c.json({ running: backup.isRunning(), backups: backup.list() }) : c.json({ error: "备份未启用" }, 503));
+  app.post("/api/backups", async c => {
+    if (!backup) return c.json({ error: "备份未启用" }, 503);
+    if (backup.isRunning()) return c.json({ error: "已有备份在进行中" }, 409);
+    try { return c.json(await backup.run()); }
+    catch (e) { return c.json({ error: String(e) }, 503); }
+  });
+  app.delete("/api/backups/:name", c => {
+    if (!backup) return c.json({ error: "备份未启用" }, 503);
+    const ok = backup.remove(c.req.param("name"));
+    return ok ? c.json({ removed: true }) : c.json({ error: "删除失败（名称非法或不存在）" }, 400);
+  });
 
   // 静态托管 web/dist（SPA 回退）；无 dist 时给出可读提示
   const distRoot = resolve(join(import.meta.dir, "..", "..", "web", "dist"));
