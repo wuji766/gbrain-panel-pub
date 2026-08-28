@@ -23,7 +23,11 @@ const nav = [
   { to: "/capture", label: "快速记事" },
   { to: "/graph", label: "知识图谱" },
   { to: "/timeline", label: "时间线" },
-  { to: "/m4", label: "运维 · 维护（M4）", disabled: true },
+  { to: "/ops/requests", label: "请求日志" },
+  { to: "/ops/jobs", label: "任务队列" },
+  { to: "/ops/agents", label: "Agents · 密钥" },
+  { to: "/backup", label: "备份（M4）", disabled: true },
+  { to: "/config", label: "配置（M4）", disabled: true },
 ];
 </script>
 
