@@ -13,6 +13,7 @@ const keys = ref<KeyRow[]>([]);
 const showNew = ref(false);
 const newName = ref("");
 const createdToken = ref<string | null>(null);
+const issued = ref(false); // 签发成功后置 true：禁用 positive 按钮防连点（重复签发只会再累积同名 key）
 
 async function load() {
   try {
@@ -30,6 +31,7 @@ async function createKey() {
   try {
     const json = await api<{ token?: string }>("/ops/api-keys", { method: "POST", body: JSON.stringify({ name: newName.value.trim() }) });
     createdToken.value = json.token ?? "(响应未含 token)";
+    issued.value = true;
     message.success("已签发——token 仅显示这一次");
     await load();
     return false; // 不关闭弹窗：token 需当场复制，用户手动关闭
@@ -66,7 +68,7 @@ onMounted(load);
 <template>
   <div class="page">
     <h2>Agents 与密钥</h2>
-    <NButton size="small" type="primary" style="margin-bottom: 12px" @click="showNew = true; createdToken = null; newName = ''">签发 API Key</NButton>
+    <NButton size="small" type="primary" style="margin-bottom: 12px" @click="showNew = true; issued = false; createdToken = null; newName = ''">签发 API Key</NButton>
     <NCard title="Agents（OAuth 客户端 + API key）" size="small">
       <NDataTable :columns="agentColumns" :data="agents" :bordered="false" size="small" />
     </NCard>
@@ -74,7 +76,7 @@ onMounted(load);
       <NDataTable :columns="keyColumns" :data="keys" :bordered="false" size="small" />
     </NCard>
 
-    <NModal v-model:show="showNew" title="签发 API Key" preset="dialog" positive-text="签发" negative-text="关闭" @positive-click="createKey">
+    <NModal v-model:show="showNew" title="签发 API Key" preset="dialog" :positive-text="issued ? '已签发' : '签发'" :positive-button-props="{ disabled: issued }" negative-text="关闭" @positive-click="createKey">
       <NInput v-model:value="newName" placeholder="key 名称（必填）" />
       <div v-if="createdToken" style="margin-top: 12px">
         <NTag type="warning" size="small">token 仅此一次显示，请立即复制保存：</NTag>

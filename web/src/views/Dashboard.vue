@@ -34,6 +34,14 @@ const numericEntries = computed(() =>
 const otherEntries = computed(() =>
   Object.entries(stats.value ?? {}).filter(([, v]) => typeof v !== "number"));
 
+// stats 字段 → 中文标签 + 口径注释；未命中映射表的字段原样显示字段名
+const statLabels: Record<string, string> = {
+  connected_agents: "已连接 Agents（含已撤销客户端）",
+  active_tokens: "活跃 OAuth Token（未过期）",
+  active_api_keys: "活跃 API Key（未撤销，含同名历史累积）",
+  requests_today: "近 24h 请求数",
+};
+
 const fullNumeric = computed(() =>
   Object.entries(fullStats.value ?? {}).filter((e): e is [string, number] => typeof e[1] === "number"));
 const fullOther = computed(() =>
@@ -64,9 +72,10 @@ const fullOther = computed(() =>
     </NCard>
     <NGrid v-if="numericEntries.length" :cols="4" :x-gap="12" :y-gap="12">
       <NGi v-for="[k, v] in numericEntries" :key="k">
-        <NCard size="small"><NStatistic :label="k" :value="v" /></NCard>
+        <NCard size="small"><NStatistic :label="statLabels[k] ?? k" :value="v" /></NCard>
       </NGi>
     </NGrid>
+    <p v-if="numericEntries.length" class="muted" style="margin-top: 8px">口径说明：active_api_keys 统计未撤销的 access_tokens 行（与 Agents 页同口径）；gbrain 自身的 bootstrap-harness 会按名累积，可用 Agents 页按名撤销清理。</p>
     <NCard v-if="otherEntries.length" title="统计（其他字段）" size="small">
       <pre>{{ JSON.stringify(Object.fromEntries(otherEntries), null, 2) }}</pre>
     </NCard>

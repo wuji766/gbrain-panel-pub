@@ -90,6 +90,7 @@ onUnmounted(() => es?.close());
       <NButton v-if="page < pages" size="small" @click="page++; load()">下一页</NButton>
       <span class="muted">共 {{ total }} 条（第 {{ page }}/{{ pages }} 页）</span>
     </div>
+    <p v-if="live" class="muted" style="margin: 0 0 8px">实时模式：查询/翻页会替换列表（实时行随之清除）；连接中断自动重连</p>
     <NDataTable :columns="columns" :data="rows" :bordered="false" size="small" :row-key="(r: Row) => r.id ?? 0" />
     <NTag v-if="live" type="success" size="small" style="margin-top: 8px">实时事件插入列表头部（最新 100 条）</NTag>
   </div>

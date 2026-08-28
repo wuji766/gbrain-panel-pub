@@ -32,7 +32,7 @@ const fmt = (b: number) => b > 1048576 ? `${(b / 1048576).toFixed(1)} MB` : `${(
 const columns = [
   { title: "名称", key: "name" },
   { title: "大小", key: "sizeBytes", render: (b: BackupInfo) => fmt(b.sizeBytes) },
-  { title: "时间", key: "createdAt", render: (b: BackupInfo) => b.createdAt.slice(0, 19).replace("T", " ") },
+  { title: "时间", key: "createdAt", render: (b: BackupInfo) => new Date(b.createdAt).toLocaleString() },
   { title: "操作", key: "actions", render: (b: BackupInfo) => hDel(b.name) },
 ];
 
