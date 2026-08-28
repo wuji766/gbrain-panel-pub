@@ -18,6 +18,12 @@ export function createApp(deps: { cfg: PanelConfig; orch: Orchestrator; client: 
   app.get("/api/status", c =>
     c.json({ state: orch.getState(), effectivePort: orch.getEffectivePort(), panelPort: cfg.panelPort, logs: orch.getRecentLogs().slice(-30) }));
 
+  // 面板自身 config.json 只读脱敏：bootstrapToken 永不出后端，其余字段（含 updateProxy）原样
+  app.get("/api/panel-config", c => {
+    const { bootstrapToken: _hidden, ...rest } = cfg;
+    return c.json({ ...rest, bootstrapToken: "<已隐藏>" });
+  });
+
   app.get("/api/stats", async c => {
     try { return c.json(await client.adminGet("/admin/api/stats")); }
     catch (e) { return c.json({ error: String(e) }, 502); }

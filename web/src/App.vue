@@ -27,7 +27,7 @@ const nav = [
   { to: "/ops/jobs", label: "任务队列" },
   { to: "/ops/agents", label: "Agents · 密钥" },
   { to: "/backup", label: "备份" },
-  { to: "/config", label: "配置（M4）", disabled: true },
+  { to: "/config", label: "配置" },
 ];
 </script>
 
@@ -38,8 +38,7 @@ const nav = [
         <h1 class="logo">gbrain 面板</h1>
         <nav>
           <template v-for="item in nav" :key="item.to">
-            <RouterLink v-if="!item.disabled" :to="item.to" class="nav-item">{{ item.label }}</RouterLink>
-            <span v-else class="nav-item disabled">{{ item.label }}</span>
+            <RouterLink :to="item.to" class="nav-item">{{ item.label }}</RouterLink>
           </template>
         </nav>
       </aside>
@@ -70,7 +69,6 @@ const nav = [
 .logo { font-size: 16px; margin: 0 0 16px; }
 .nav-item { display: block; padding: 8px 10px; margin: 2px 0; border-radius: 6px; color: inherit; text-decoration: none; }
 .nav-item:hover { background: #f3f3f6; }
-.nav-item.disabled { color: #b0b0b8; cursor: not-allowed; }
 .main { flex: 1; position: relative; overflow: auto; }
 .topbar { display: flex; align-items: center; padding: 12px 20px; border-bottom: 1px solid #e0e0e6; }
 .overlay { position: absolute; inset: 0; background: rgba(255,255,255,.92); display: grid; place-items: center; }
