@@ -31,6 +31,8 @@ function toggleLive() {
   if (es) { es.close(); es = null; live.value = false; return; }
   es = new EventSource("/api/events");
   let liveSeq = 0;
+  let warned = false; // 同一轮断连只提示一次，避免原生重连期间 toast 刷屏
+  es.onopen = () => { warned = false; };
   es.onmessage = ev => {
     try {
       const d = JSON.parse(ev.data) as { agent?: string; operation?: string; latency_ms?: number; status?: string; timestamp?: string };
@@ -49,7 +51,8 @@ function toggleLive() {
       rows.value = rows.value.slice(0, 100);
     } catch { /* 忽略非 JSON */ }
   };
-  es.onerror = () => { es?.close(); es = null; live.value = false; message.warning("实时流断开"); };
+  // 不 close：EventSource 原生自动重连，保留 live 状态；手动停止走 toggleLive 顶部分支
+  es.onerror = () => { if (!warned) { warned = true; message.warning("连接中断，自动重连中…"); } };
   live.value = true;
 }
 

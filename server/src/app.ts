@@ -15,8 +15,9 @@ export function createApp(deps: { cfg: PanelConfig; orch: Orchestrator; client: 
   const { cfg, orch, client, backup } = deps;
   const app = new Hono();
 
+  // backupRunning 并入 status（零磁盘 IO）：前端全局轮询只打这一个接口，消除备份列表每 5s 的高频 stat
   app.get("/api/status", c =>
-    c.json({ state: orch.getState(), effectivePort: orch.getEffectivePort(), panelPort: cfg.panelPort, logs: orch.getRecentLogs().slice(-30) }));
+    c.json({ state: orch.getState(), effectivePort: orch.getEffectivePort(), panelPort: cfg.panelPort, backupRunning: backup?.isRunning() ?? false, logs: orch.getRecentLogs().slice(-30) }));
 
   // 面板自身 config.json 只读脱敏：bootstrapToken 永不出后端，其余字段（含 updateProxy）原样
   app.get("/api/panel-config", c => {

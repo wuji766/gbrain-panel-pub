@@ -1,7 +1,7 @@
 import { defineStore } from "pinia";
 import { api } from "../api/client";
 
-export interface PanelStatus { state: string; effectivePort: number; panelPort: number; logs: string[] }
+export interface PanelStatus { state: string; effectivePort: number; panelPort: number; backupRunning?: boolean; logs: string[] }
 
 export const useConnection = defineStore("connection", {
   state: () => ({
@@ -13,14 +13,12 @@ export const useConnection = defineStore("connection", {
     async refresh() {
       try {
         this.status = await api<PanelStatus>("/status");
+        this.backupRunning = this.status.backupRunning ?? false;
         this.online = true;
       } catch {
-        this.online = false;
+        // 备份进行中会停 serve/阻塞响应，status 拉取失败不算离线（容忍取自最近一次成功响应的 backupRunning）
+        if (!this.backupRunning) this.online = false;
       }
-      // 顺带轮询备份进行中状态（App.vue 顶部横幅用）；面板未启用备份（503）时保持 false，不报错
-      api<{ running: boolean }>("/backups")
-        .then(j => { this.backupRunning = j.running; })
-        .catch(() => {});
     },
   },
 });
