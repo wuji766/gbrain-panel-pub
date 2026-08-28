@@ -45,6 +45,9 @@ export function loadConfig(path: string): PanelConfig {
   }
   const parsed = JSON.parse(readFileSync(path, "utf8")) as Partial<PanelConfig>;
   const cfg = { ...DEFAULTS, ...parsed } as PanelConfig;
+  // retention 下限：0/非数经 || 回默认 5，负数 floor 后仍 <1 则钳到 1（0/负份数会让保留策略永不删除或行为未定义）。
+  // 放在 saveConfig 之前，缺 token 回写时落盘的也是钳后的合法值。
+  cfg.backupRetention = Math.max(1, Math.floor(Number(cfg.backupRetention) || 5));
   if (!parsed.bootstrapToken) { cfg.bootstrapToken = generateToken(); saveConfig(path, cfg); }
   return cfg;
 }

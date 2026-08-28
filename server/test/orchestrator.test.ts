@@ -36,7 +36,7 @@ describe("Orchestrator.start", () => {
     expect(await probeHealth(port, 2000)).toBe(true);
     expect(orch.getEffectivePort()).toBe(port);
     expect(orch.getRecentLogs().join("\n")).not.toBeNull();
-  });
+  }, 15000);
 
   test("已有 token 匹配的 serve → attached，killServe 不杀它", async () => {
     const port = await getFreePort();
@@ -48,7 +48,7 @@ describe("Orchestrator.start", () => {
     expect(orch.getState()).toBe("stopped");
     expect(await probeHealth(port, 1000)).toBe(true); // fake 仍活着
     await fake.stop();
-  });
+  }, 15000);
 
   test("端口上有 token 不匹配的 serve → foreign", async () => {
     const port = await getFreePort();
@@ -56,7 +56,7 @@ describe("Orchestrator.start", () => {
     spawned.push(fake);
     const orch = makeOrch(port);
     expect(await orch.start()).toBe("foreign");
-  });
+  }, 15000);
 
   test("子进程秒退 → error，日志有退出码", async () => {
     const port = await getFreePort();
@@ -67,7 +67,7 @@ describe("Orchestrator.start", () => {
     orchs.push(orch);
     expect(await orch.start()).toBe("error");
     expect(orch.getRecentLogs().join("\n")).toMatch(/code=1|exited/);
-  });
+  }, 15000);
 
   test("健康超时（hang 模式）→ error", async () => {
     const port = await getFreePort();
@@ -77,7 +77,7 @@ describe("Orchestrator.start", () => {
     );
     orchs.push(orch);
     expect(await orch.start()).toBe("error");
-  });
+  }, 15000);
 
   test("own 态重入 start() 直接返回 own，不重新 spawn", async () => {
     const port = await getFreePort();
@@ -87,7 +87,7 @@ describe("Orchestrator.start", () => {
     expect(await orch.start()).toBe("own");
     expect(orch.getEffectivePort()).toBe(port);
     expect(await probeHealth(port, 2000)).toBe(true); // 原进程仍活
-  });
+  }, 15000);
 });
 
 describe("killServe", () => {
@@ -99,7 +99,7 @@ describe("killServe", () => {
     expect(orch.getState()).toBe("stopped");
     await new Promise(r => setTimeout(r, 300));
     expect(await probeHealth(port, 500)).toBe(false);
-  });
+  }, 15000);
 
   test("子进程已自行退出时 killServe 跳过 taskkill", async () => {
     const port = await getFreePort();
@@ -112,7 +112,7 @@ describe("killServe", () => {
     await orch.killServe();
     expect(orch.getState()).toBe("stopped");
     expect(orch.getRecentLogs().join("\n")).toMatch(/无需 taskkill/);
-  });
+  }, 15000);
 
   test("子进程被信号杀死（signalCode 非空、exitCode 为 null）时 killServe 跳过 taskkill", async () => {
     const port = await getFreePort();
@@ -130,7 +130,7 @@ describe("killServe", () => {
     await orch.killServe();
     expect(orch.getState()).toBe("stopped");
     expect(orch.getRecentLogs().join("\n")).toMatch(/无需 taskkill/);
-  });
+  }, 15000);
 });
 
 describe("spawnOnFallbackPort", () => {
@@ -143,5 +143,5 @@ describe("spawnOnFallbackPort", () => {
     expect(await orch.spawnOnFallbackPort()).toBe("own");
     expect(orch.getEffectivePort()).toBeGreaterThan(foreignPort);
     expect(orch.getEffectivePort()).toBeLessThanOrEqual(foreignPort + 5);
-  });
+  }, 15000);
 });

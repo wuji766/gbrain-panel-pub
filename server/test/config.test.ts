@@ -1,6 +1,6 @@
 // server/test/config.test.ts
 import { describe, test, expect, beforeEach, afterEach } from "bun:test";
-import { mkdtempSync, rmSync, existsSync, readFileSync, mkdirSync } from "node:fs";
+import { mkdtempSync, rmSync, existsSync, readFileSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { loadConfig, generateToken } from "../src/config";
 
@@ -32,6 +32,16 @@ describe("loadConfig", () => {
     expect(cfg.gbrainPort).toBe(3131);
     const onDisk = JSON.parse(readFileSync(p, "utf8"));
     expect(onDisk.bootstrapToken).toBe(cfg.bootstrapToken);
+  });
+});
+
+describe("backupRetention 下限", () => {
+  test("0/负数/非数回退至少 1", () => {
+    const p = join(dir, "config.json");
+    for (const bad of [0, -3, "abc", null]) {
+      writeFileSync(p, JSON.stringify({ backupRetention: bad }));
+      expect(loadConfig(p).backupRetention).toBeGreaterThanOrEqual(1);
+    }
   });
 });
 

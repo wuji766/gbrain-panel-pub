@@ -46,7 +46,9 @@ export function contentRoutes(client: GbrainClient) {
           if (v) filters[k] = v;
         }
         const [aliveRes, allRes] = await Promise.all([
-          client.mcpCall("list_pages", { limit, offset: 0, include_deleted: false, ...filters }),
+          // 存活集 limit 放大为 offset+limit：offset>0 时只取 limit 行会漏掉窗口尾部，
+          // 窗口内存活行因不在差集基准里被误判为已删、多发 get_page（M5-2 修复）
+          client.mcpCall("list_pages", { limit: offset + limit, offset: 0, include_deleted: false, ...filters }),
           client.mcpCall("list_pages", { limit, offset, include_deleted: true, ...filters }),
         ]);
         const aliveSlugs = new Set(normRows(aliveRes).map(r => String(r.slug ?? "")));

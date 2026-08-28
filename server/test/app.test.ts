@@ -79,3 +79,13 @@ describe("index.html 禁缓存", () => {
     expect(res.headers.get("cache-control")).toBe("no-cache");
   }, 15000);
 });
+
+describe("panel-config 掩蔽", () => {
+  test("bootstrapToken 不出现、其余字段原样", async () => {
+    const { panelPort, fake } = await boot();
+    const json = await (await fetch(`http://127.0.0.1:${panelPort}/api/panel-config`)).json() as Record<string, unknown>;
+    expect(json.bootstrapToken).toBe("<已隐藏>");
+    expect(JSON.stringify(json)).not.toContain(String(TOKEN));
+    expect(json.gbrainPort).toBe(fake.port);
+  }, 15000);
+});
