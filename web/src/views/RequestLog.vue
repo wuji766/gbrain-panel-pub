@@ -51,8 +51,15 @@ function toggleLive() {
       rows.value = rows.value.slice(0, 100);
     } catch { /* 忽略非 JSON */ }
   };
-  // 不 close：EventSource 原生自动重连，保留 live 状态；手动停止走 toggleLive 顶部分支
-  es.onerror = () => { if (!warned) { warned = true; message.warning("连接中断，自动重连中…"); } };
+  es.onerror = () => {
+    if (es && es.readyState === EventSource.CLOSED) {
+      // HTTP 层错误（如备份期代理 502）会置 CLOSED 终态且不再自动重连——回退为诚实断开
+      es.close(); es = null; live.value = false;
+      message.error("实时流已断开（服务暂不可用）——恢复后请重新开启");
+      return;
+    }
+    if (!warned) { warned = true; message.warning("连接中断，自动重连中…"); }
+  };
   live.value = true;
 }
 
