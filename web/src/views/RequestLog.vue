@@ -30,8 +30,24 @@ async function load() {
 function toggleLive() {
   if (es) { es.close(); es = null; live.value = false; return; }
   es = new EventSource("/api/events");
+  let liveSeq = 0;
   es.onmessage = ev => {
-    try { rows.value.unshift(JSON.parse(ev.data) as Row); rows.value = rows.value.slice(0, 100); } catch { /* 忽略非 JSON */ }
+    try {
+      const d = JSON.parse(ev.data) as { agent?: string; operation?: string; latency_ms?: number; status?: string; timestamp?: string };
+      const okAgent = !agent.value.trim() || agent.value.trim() === "all" || (d.agent ?? "").includes(agent.value.trim());
+      const okOp = !operation.value.trim() || (d.operation ?? "").includes(operation.value.trim());
+      const okStatus = !status.value.trim() || (d.status ?? "").includes(status.value.trim());
+      if (!(okAgent && okOp && okStatus)) return;
+      rows.value.unshift({
+        id: -(Date.now() + ++liveSeq),           // 负数合成 id 避免与库 id 冲突
+        agent_name: d.agent,
+        operation: d.operation,
+        latency_ms: d.latency_ms,
+        status: d.status,
+        created_at: d.timestamp,
+      });
+      rows.value = rows.value.slice(0, 100);
+    } catch { /* 忽略非 JSON */ }
   };
   es.onerror = () => { es?.close(); es = null; live.value = false; message.warning("实时流断开"); };
   live.value = true;
