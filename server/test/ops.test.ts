@@ -75,4 +75,26 @@ describe("运维路由", () => {
     expect(res.headers.get("content-type")).toContain("text/event-stream");
     ctrl.abort(); // 读到头即可，流由 abort 掐断
   }, 15000);
+
+  test("SSE 空闲心跳：上游无数据时面板注入 : ping 保活（M6）", async () => {
+    const { panelPort } = await boot();
+    const ctrl = new AbortController();
+    const res = await fetch(`http://127.0.0.1:${panelPort}/api/events`, { signal: ctrl.signal });
+    expect(res.headers.get("content-type")).toContain("text/event-stream");
+    // fake 的 /admin/events 握手写一次 ": connected" 后挂起——空闲期只能来自面板心跳
+    const reader = res.body!.getReader();
+    let text = "";
+    const deadline = Date.now() + 6500; // 首个 ping ~5s，留 1.5s 余量
+    while (Date.now() < deadline) {
+      const chunk = await Promise.race([
+        reader.read(),
+        new Promise<undefined>(r => setTimeout(() => r(undefined), Math.max(0, deadline - Date.now()))),
+      ]);
+      if (!chunk) break;
+      text += new TextDecoder().decode(chunk.value);
+      if (text.includes(": ping")) break;
+    }
+    ctrl.abort();
+    expect(text).toContain(": ping");
+  }, 15000);
 });

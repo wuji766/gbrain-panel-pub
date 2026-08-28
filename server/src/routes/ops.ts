@@ -50,15 +50,44 @@ export function opsRoutes(client: GbrainClient) {
     catch (e) { return c.json({ error: String(e) }, 502); }
   });
 
-  // SSE 透传：/admin/events 流式原样转发（响应头在此重设，body 直通上游流）。
-  // 上游非 2xx / 无 body → 502；客户端断开由运行时传播至上游流。
+  // SSE 透传：/admin/events 流式转发 + 面板侧 5s 心跳（M6）。上游 gbrain 的 SSE 握手只写
+  // 一次 ": connected"（源码 serve-http.ts openAdminSseStream，无周期心跳）且不杀空闲流；
+  // 而 Bun.serve 默认 idleTimeout=10s 会杀面板这端的空闲响应——浏览器腿每 ~10s 断一次，
+  // EventSource 反复重连（M5 验收缺陷 A）。注入 ": ping\n\n"（SSE 注释行，EventSource 规范
+  // 忽略，前端零改动）保活；上游断流则收尾浏览器腿，由 EventSource 原生重连兜底。
   app.get("/events", async c => {
     try {
       const upstream = await client.adminFetchRaw("/admin/events");
       if (!upstream.ok || !upstream.body) {
         return c.json({ error: `admin -> HTTP ${upstream.status}` }, 502);
       }
-      return new Response(upstream.body, {
+      const reader = upstream.body.getReader();
+      const enc = new TextEncoder();
+      let pingTimer: ReturnType<typeof setInterval> | undefined;
+      const stopPing = () => { if (pingTimer !== undefined) { clearInterval(pingTimer); pingTimer = undefined; } };
+      const stream = new ReadableStream<Uint8Array>({
+        start(controller) {
+          pingTimer = setInterval(() => {
+            try { controller.enqueue(enc.encode(": ping\n\n")); } catch { stopPing(); } // 客户端已断开
+          }, 5000);
+          (async () => {
+            try {
+              for (;;) {
+                const { done, value } = await reader.read();
+                if (done) break;
+                controller.enqueue(value);
+              }
+            } catch { /* 上游断流：收尾浏览器腿，交给 EventSource 原生重连 */ }
+            stopPing();
+            try { controller.close(); } catch { /* 已关 */ }
+          })();
+        },
+        cancel(reason) {
+          stopPing();
+          reader.cancel(reason).catch(() => {});
+        },
+      });
+      return new Response(stream, {
         headers: { "content-type": "text/event-stream", "cache-control": "no-cache", connection: "keep-alive" },
       });
     } catch (e) { return c.json({ error: String(e) }, 502); }
