@@ -42,6 +42,15 @@ export function createApp(deps: { cfg: PanelConfig; orch: Orchestrator; client: 
   app.get("/api/update-check", async c => {
     const banner = [...orch.getRecentLogs()].reverse().find(l => /GBrain MCP Server v[\d.]+/.test(l));
     const current = banner?.match(/GBrain MCP Server v(\d+(?:\.\d+)*)/)?.[1] ?? null;
+    // 版本比较必须按分量（"0.46.32" vs "0.46.5"：字典序会误判 32 < 5）
+    const compareVersions = (a: string, b: string): number => {
+      const pa = a.split(".").map(Number), pb = b.split(".").map(Number);
+      for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+        const d = (pa[i] ?? 0) - (pb[i] ?? 0);
+        if (d !== 0) return d;
+      }
+      return 0;
+    };
     const parseVersion = (body: string): string | null => {
       const first = body.slice(0, 256).trim().split("\n")[0].trim();
       return first.match(/^v?(\d+\.\d+\.\d+(?:\.\d+)?)/)?.[1] ?? null;
@@ -65,7 +74,7 @@ export function createApp(deps: { cfg: PanelConfig; orch: Orchestrator; client: 
     return c.json({
       current, latest, networkError,
       checkedAt: new Date().toISOString(),
-      upToDate: current && latest ? current >= latest : null,
+      upToDate: current && latest ? compareVersions(current, latest) >= 0 : null,
     });
   });
 
@@ -91,12 +100,17 @@ export function createApp(deps: { cfg: PanelConfig; orch: Orchestrator; client: 
     const target = safeDistPath(rel);
     if (!target) return c.text("Not Found", 404);
     const file = Bun.file(target);
-    if (await file.exists()) return new Response(file);
+    if (await file.exists()) {
+      // index.html 禁缓存（重新构建后须立即生效）；其余静态文件（assets 文件名带 hash）保持现状不加缓存头
+      return target === safeDistPath("index.html")
+        ? new Response(file, { headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-cache" } })
+        : new Response(file);
+    }
     // SPA 回退：index.html 为固定常量，resolve 后天然在 distRoot 内，走同一校验保持路径统一
     const index = safeDistPath("index.html");
     if (!index) return c.text("Not Found", 404);
     const indexFile = Bun.file(index);
-    if (await indexFile.exists()) return new Response(indexFile, { headers: { "content-type": "text/html; charset=utf-8" } });
+    if (await indexFile.exists()) return new Response(indexFile, { headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-cache" } });
     return c.text("web/dist 未构建：请在 web/ 目录执行 bun run build（由用户手动执行）", 200);
   });
 

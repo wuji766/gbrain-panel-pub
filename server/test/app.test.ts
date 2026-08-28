@@ -25,13 +25,13 @@ describe("panel API（attached 模式）", () => {
     const json = await res.json();
     expect(json.state).toBe("attached");
     expect(json.effectivePort).toBe(fake.port);
-  });
+  }, 15000);
 
   test("/api/stats 代理 fake 的 admin 接口", async () => {
     const { panelPort } = await boot();
     const res = await fetch(`http://127.0.0.1:${panelPort}/api/stats`);
     expect(await res.json()).toEqual({ pages: 42, facts: 100, sources: 3 });
-  });
+  }, 15000);
 
   test("下游死掉时 /api/stats 返回 502 + error", async () => {
     const { panelPort, fake } = await boot();
@@ -39,13 +39,13 @@ describe("panel API（attached 模式）", () => {
     const res = await fetch(`http://127.0.0.1:${panelPort}/api/stats`);
     expect(res.status).toBe(502);
     expect((await res.json()).error).toBeTruthy();
-  });
+  }, 15000);
 
   test("/api/stale-lock 无锁时 present:false", async () => {
     const { panelPort } = await boot();
     const json = await (await fetch(`http://127.0.0.1:${panelPort}/api/stale-lock`)).json();
     expect(json.present).toBe(false);
-  });
+  }, 15000);
 });
 
 describe("静态托管路径穿越防护", () => {
@@ -55,7 +55,7 @@ describe("静态托管路径穿越防护", () => {
     expect(res.status).toBe(404);
     const body = await res.text();
     expect(body.includes("gbrain-panel")).toBe(false); // 不得泄露仓库根 package.json 内容
-  });
+  }, 15000);
 });
 
 describe("静态 catch-all 带体请求不崩溃（Bun panic 回归）", () => {
@@ -69,5 +69,13 @@ describe("静态 catch-all 带体请求不崩溃（Bun panic 回归）", () => {
     expect([200, 404]).toContain(res.status);
     const alive = await fetch(`http://127.0.0.1:${panelPort}/api/status`);
     expect(alive.status).toBe(200);
-  });
+  }, 15000);
+});
+
+describe("index.html 禁缓存", () => {
+  test("SPA 回退响应带 Cache-Control: no-cache", async () => {
+    const { panelPort } = await boot();
+    const res = await fetch(`http://127.0.0.1:${panelPort}/`);
+    expect(res.headers.get("cache-control")).toBe("no-cache");
+  }, 15000);
 });

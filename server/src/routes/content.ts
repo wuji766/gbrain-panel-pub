@@ -106,7 +106,8 @@ export function contentRoutes(client: GbrainClient) {
   app.get("/facts", async c => {
     const args: Record<string, unknown> = {
       include_expired: c.req.query("include_expired") === "true",
-      limit: Number(c.req.query("limit") ?? 100),
+      // 与 /pages 一致的 NaN 守卫：?limit=abc 回默认 100，不下传 NaN（同 numOr 注释的理由）
+      limit: numOr(c.req.query("limit"), 100),
     };
     const entity = c.req.query("entity");
     if (entity) args.entity = entity;

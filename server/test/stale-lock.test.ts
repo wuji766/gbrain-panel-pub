@@ -51,3 +51,34 @@ describe("clearStaleLock", () => {
     expect(existsSync(join(home, ".gbrain", ".gbrain-lock"))).toBe(true);
   });
 });
+
+// 真实布局（2026-08 实测）：锁在 database_path 指向的 brain.pglite 目录内，
+// database_path 记录于 <home>/.gbrain/config.json；旧路径 <home>/.gbrain/.gbrain-lock 仅作兼容回退。
+describe("锁路径跟随 database_path（真实布局）", () => {
+  test("config.json 指定 database_path 时锁目录在其下", () => {
+    const gbrainHome2 = mkdtempSync(join(TMP, "lock2-"));
+    const dot = join(gbrainHome2, ".gbrain");
+    mkdirSync(dot, { recursive: true });
+    writeFileSync(join(dot, "config.json"), JSON.stringify({ database_path: "custom-db" }));
+    const lockDir = join(dot, "custom-db", ".gbrain-lock");
+    mkdirSync(lockDir, { recursive: true });
+    writeFileSync(join(lockDir, "lock"), "x");
+    const t = new Date(Date.now() - 120_000);
+    utimesSync(join(lockDir, "lock"), t, t);
+    const s = readLockStatus(gbrainHome2);
+    expect(s.present).toBe(true);
+    expect(s.stale).toBe(true);
+    expect(s.lockDir).toBe(lockDir);
+    rmSync(gbrainHome2, { recursive: true, force: true });
+  });
+
+  test("config.json 缺失时回退旧路径仍可用", () => {
+    const gbrainHome3 = mkdtempSync(join(TMP, "lock3-"));
+    const lockDir = join(gbrainHome3, ".gbrain", ".gbrain-lock");
+    mkdirSync(lockDir, { recursive: true });
+    writeFileSync(join(lockDir, "lock"), "x");
+    const s = readLockStatus(gbrainHome3);
+    expect(s.present).toBe(true);
+    rmSync(gbrainHome3, { recursive: true, force: true });
+  });
+});
