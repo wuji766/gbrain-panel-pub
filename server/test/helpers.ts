@@ -22,7 +22,7 @@ export function getFreePort(): Promise<number> {
 export interface FakeGbrainHandle { port: number; child: ReturnType<typeof spawn>; stop(): Promise<void> }
 
 export async function startFakeGbrain(opts: {
-  mode: "healthy" | "foreign"; token: string; port?: number; healthDelayMs?: number;
+  mode: "healthy" | "foreign"; token: string; port?: number; healthDelayMs?: number; env?: Record<string, string>;
 }): Promise<FakeGbrainHandle> {
   const port = opts.port ?? await getFreePort();
   const child = spawn(process.execPath, [join(import.meta.dir, "fixtures", "fake-gbrain.ts")], {
@@ -32,6 +32,7 @@ export async function startFakeGbrain(opts: {
       FAKE_TOKEN: opts.token,
       FAKE_MODE: opts.mode,
       HEALTH_DELAY_MS: String(opts.healthDelayMs ?? 0),
+      ...(opts.env ?? {}),
     },
     stdio: ["ignore", "pipe", "pipe"],
   });
@@ -53,8 +54,8 @@ export async function startFakeGbrain(opts: {
   };
 }
 
-export async function bootPanelWithFake(mode: "healthy" | "foreign", token: string) {
-  const fake = await startFakeGbrain({ mode, token });
+export async function bootPanelWithFake(mode: "healthy" | "foreign", token: string, env?: Record<string, string>) {
+  const fake = await startFakeGbrain({ mode, token, env });
   const cfg: PanelConfig = { gbrainBin: "", gbrainHome: "", panelPort: 0, gbrainPort: fake.port, bootstrapToken: token, backupDir: "", backupRetention: 5, updateProxy: "", updateUrl: "http://127.0.0.1:9/VERSION" };
   const orch = new Orchestrator(cfg, { spawnSpec: { bin: "unused", baseArgs: [] } });
   await orch.start();

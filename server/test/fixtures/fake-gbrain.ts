@@ -153,12 +153,19 @@ if (mode === "hang") {
               if (!frontier.length) break;
             }
             const nodes = [...slugs].map(sg => pages.get(sg)).filter((p): p is FakePage => Boolean(p)).map((p: FakePage) => ({ slug: p.slug, title: p.title, type: p.type }));
+            // FAKE_GRAPH_SHAPE=paths：对齐真实形状——传 direction 时 gbrain 返回 GraphPath 裸数组
+            // （from_slug/to_slug/link_type），无命中时为 []（空数组，非 {edges:[]} 包装）。
+            if (process.env.FAKE_GRAPH_SHAPE === "paths") {
+              return ok(edges.map(e => ({ from_slug: e.source, to_slug: e.target, link_type: e.type, context: "", depth: 1 })));
+            }
             return ok({ edges, nodes });
           }
           case "entity": {
             const q = String(a.name ?? "").toLowerCase();
             const hit = [...pages.values()].find(p => p.slug.toLowerCase().includes(q) || p.title.toLowerCase().includes(q));
             if (!hit) return ok({ found: false, suggestions: [{ slug: "people/alice", title: "Alice" }] });
+            // dead-page 特例（M4-1 兜底测试依赖）：notes/dead-page 不在 links 种子里（traverse 必空），
+            // expand 空结果回退 entity 时靠这组卡关联——out 方向 → source=dead-page/target=seed-2。
             return ok({ found: true, card: {
               entity: { slug: hit.slug, title: hit.title, type: hit.type }, aka: [], summary: "fake summary",
               last_touched: hit.updatedAt, open_threads: [],

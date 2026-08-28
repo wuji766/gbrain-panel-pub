@@ -11,7 +11,7 @@ import type { NodeData, IElementEvent } from "@antv/g6";
 import { api } from "../api/client";
 
 interface GNode { id: string; label: string; nodeType: string }
-interface GEdge { source: string; target: string; type: string }
+interface GEdge { source: string; target: string; type?: string }
 interface EntityCard { found?: boolean; card?: { entity?: { slug?: string; title?: string; type?: string }; aka?: string[]; summary?: string; edges?: { type?: string; direction?: string; slug?: string }[]; backlink_count?: number; active_fact_count?: number }; suggestions?: { slug?: string; title?: string }[] }
 
 const router = useRouter();
@@ -28,11 +28,13 @@ function pushNode(id: string, label: string, nodeType: string) {
   if (!nodes.has(id)) nodes.set(id, { id, label, nodeType });
 }
 function pushEdge(e: GEdge) {
-  const key = `${e.source}->${e.target}`;
+  // 去重键含 type：同一对节点间不同类型的多条边都会保留（与服务端 dedupeEdges 同键格式）
+  const key = `${e.source}->${e.target}::${e.type ?? "link"}`;
   if (!edges.has(key)) edges.set(key, e);
 }
 
 async function seed() {
+  nodes.clear(); edges.clear(); card.value = null; // 换过滤条件重播种子时清空旧图与实体卡（M3 验收缺陷）
   loading.value = true;
   try {
     const params = new URLSearchParams({ limit: "30", sort: "updated_desc" });
@@ -105,7 +107,7 @@ onBeforeUnmount(() => { graph?.destroy(); graph = null; });
     <h2>知识图谱</h2>
     <div class="toolbar">
       <NInput v-model:value="filterType" placeholder="种子类型过滤（如 note）" clearable style="width: 200px" @keyup.enter="seed" />
-      <NButton size="small" @click="nodes.clear(); edges.clear(); card = null; seed()">重置</NButton>
+      <NButton size="small" @click="seed()">重置</NButton>
       <span class="muted">单击节点：展开一度邻居 + 实体卡；双击：进详情。节点 {{ nodes.size }} / 边 {{ edges.size }}</span>
     </div>
     <div class="body">
