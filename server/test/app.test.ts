@@ -2,7 +2,6 @@
 import { describe, test, expect, afterEach } from "bun:test";
 import { bootPanelWithFake } from "./helpers";
 import { createApp } from "../src/app";
-import type { PanelConfig } from "../src/config";
 import type { Orchestrator } from "../src/orchestrator";
 import type { GbrainClient } from "../src/gbrain-client";
 import type { BackupManager } from "../src/backup";

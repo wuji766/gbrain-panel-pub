@@ -35,16 +35,6 @@ describe("loadConfig", () => {
   });
 });
 
-describe("backupRetention 下限", () => {
-  test("0/负数/非数回退至少 1", () => {
-    const p = join(dir, "config.json");
-    for (const bad of [0, -3, "abc", null]) {
-      writeFileSync(p, JSON.stringify({ backupRetention: bad }));
-      expect(loadConfig(p).backupRetention).toBeGreaterThanOrEqual(1);
-    }
-  });
-});
-
 describe("backupRetention 口径：0/负→1（钳制），非数/缺省→5（默认），小数→floor（M6）", () => {
   const loadWith = (raw: unknown): number => {
     const dir = mkdtempSync(join(import.meta.dir, ".tmp", "cfg-ret-"));
