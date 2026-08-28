@@ -8,7 +8,7 @@ import type { PanelConfig } from "../src/config";
 
 const TMP = join(import.meta.dir, ".tmp");
 let home: string, backupDir: string;
-// killServe 返回被杀自有 serve 的 pid=1234（活锁判据比对用；无锁/stale 锁的用例不消费该值）
+// killServe 返回 1234：M6 起活锁判据改持锁进程存活探测，返回值已无内部消费方（诊断/测试保留）
 const fakeOrch = (state: string) => ({ getState: () => state, killServe: async () => 1234, start: async () => "own" as const }) as unknown as Orchestrator;
 const fakeClient = {} as GbrainClient;
 
@@ -100,27 +100,50 @@ describe("备份排除运行时工件与安全检查", () => {
     expect(existsSync(join(dest, "brain.pglite", "postmaster.pid"))).toBe(false);       // 排除
   });
 
-  test("外部活锁（新鲜心跳且锁 pid≠被杀 pid）→ 中止且不产生备份", async () => {
+  test("外部活锁（锁 pid 存活）→ 中止且不产生备份，且 best-effort 拉回 serve（M-3）", async () => {
+    let starts = 0;
+    const orch = { getState: () => "own", killServe: async () => 1234, start: async () => { starts++; return "own"; } } as unknown as Orchestrator;
     const lockDir = join(home, ".gbrain", "brain.pglite", ".gbrain-lock");
     mkdirSync(lockDir, { recursive: true });
-    // mtime=now → 新鲜；锁内 pid=9999 ≠ killServe 返回的 1234 → 持锁者是外部 serve
-    writeFileSync(join(lockDir, "lock"), JSON.stringify({ pid: 9999, acquired_at: Date.now(), refreshed_at: Date.now(), command: "serve", subcommand: "http" }));
-    const bm = new BackupManager({ cfg: cfg(), orch: fakeOrch("own"), client: fakeClient });
-    await expect(bm.run()).rejects.toThrow(/活跃锁|外部 serve/);
+    // pid=测试进程自身 → 持锁者确定存活（新判据：存活即中止，与 killServe 返回值无关）
+    writeFileSync(join(lockDir, "lock"), JSON.stringify({ pid: process.pid, acquired_at: Date.now(), refreshed_at: Date.now() }));
+    const bm = new BackupManager({ cfg: cfg(), orch, client: fakeClient });
+    await expect(bm.run()).rejects.toThrow(/活跃锁|仍在运行/);
+    expect(starts).toBeGreaterThanOrEqual(1); // 中止路径必须 best-effort 拉回 serve（M-3 断言）
     const dirs = readdirSync(backupDir).filter(d => d.startsWith("gbrain-backup-"));
     expect(dirs.length).toBe(0);
   });
 
-  test("自有 serve 尸锁（锁 pid=被杀 pid，mtime 仍新鲜）→ 放行备份", async () => {
-    // 场景：own 态 serve 被 taskkill /F 强杀——不走 gbrain 优雅退出路径，锁文件残留、
-    // mtime 冻结在死前最后一次心跳（心跳 30s 一次），90s staleness 窗口内 mtime 判据必
-    // 误报"活锁"。新判据：锁内 pid === killServe 返回的被杀 pid → 亲手所杀，放行复制。
+  test("尸锁放行：锁 pid 是已退出进程（覆盖 bun shim 孙进程持锁——pid≠子进程）→ 备份产出", async () => {
+    // M5 验收 P0 的最小复现：持锁孙进程被 taskkill /T 杀死，其 pid 既非 null 也非
+    // killServe 返回的子进程 pid。构造确定已死的 pid：spawn 瞬时任进程并等它退出。
+    const dead = Bun.spawn(["cmd", "/c", "exit"], { stdout: "ignore", stderr: "ignore", stdin: "ignore", windowsHide: true });
+    await dead.exited;
     const lockDir = join(home, ".gbrain", "brain.pglite", ".gbrain-lock");
     mkdirSync(lockDir, { recursive: true });
-    writeFileSync(join(lockDir, "lock"), JSON.stringify({ pid: 1234, acquired_at: Date.now(), refreshed_at: Date.now(), command: "serve", subcommand: "http" })); // mtime=now → 新鲜
-    const bm = new BackupManager({ cfg: cfg(), orch: fakeOrch("own"), client: fakeClient });
+    writeFileSync(join(lockDir, "lock"), JSON.stringify({ pid: dead.pid, acquired_at: Date.now(), refreshed_at: Date.now() })); // mtime=now → 新鲜
+    const bm = new BackupManager({ cfg: cfg(), orch: fakeOrch("own"), client: fakeClient }); // fakeOrch 的 killServe 返回 1234 ≠ dead.pid
     const r = await bm.run();
     expect(existsSync(join(backupDir, r.name, "brain.pglite", "PG_VERSION"))).toBe(true);
+  });
+
+  test("挂起持有者（mtime 已 stale 但 pid 存活）→ 中止（mtime 不再单独放行）", async () => {
+    // 行为收紧：旧逻辑 stale 即放行；新逻辑以存活为准——心跳停了但进程还活着（可能仍在写库）必须中止
+    const lockDir = join(home, ".gbrain", "brain.pglite", ".gbrain-lock");
+    mkdirSync(lockDir, { recursive: true });
+    writeFileSync(join(lockDir, "lock"), JSON.stringify({ pid: process.pid }));
+    const t = new Date(Date.now() - 120_000);
+    utimesSync(join(lockDir, "lock"), t, t);
+    const bm = new BackupManager({ cfg: cfg(), orch: fakeOrch("own"), client: fakeClient });
+    await expect(bm.run()).rejects.toThrow(/活跃锁|仍在运行/);
+  });
+
+  test("锁 schema 漂移（新鲜锁读不出 pid）→ 保守中止（回归守卫）", async () => {
+    const lockDir = join(home, ".gbrain", "brain.pglite", ".gbrain-lock");
+    mkdirSync(lockDir, { recursive: true });
+    writeFileSync(join(lockDir, "lock"), "{}"); // mtime=now 新鲜，但无 pid 字段
+    const bm = new BackupManager({ cfg: cfg(), orch: fakeOrch("own"), client: fakeClient });
+    await expect(bm.run()).rejects.toThrow(/无法读取持锁 PID|保守中止/);
   });
 
   test("stale 锁（死残留）不阻断备份", async () => {

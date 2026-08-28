@@ -2,7 +2,7 @@
 import { describe, test, expect, beforeEach, afterEach } from "bun:test";
 import { mkdtempSync, rmSync, mkdirSync, writeFileSync, utimesSync } from "node:fs";
 import { join } from "node:path";
-import { readLockStatus, clearStaleLock } from "../src/stale-lock";
+import { readLockStatus, clearStaleLock, isPidAlive } from "../src/stale-lock";
 
 const TMP = join(import.meta.dir, ".tmp");
 mkdirSync(TMP, { recursive: true });
@@ -80,5 +80,28 @@ describe("锁路径跟随 database_path（真实布局）", () => {
     const s = readLockStatus(gbrainHome3);
     expect(s.present).toBe(true);
     rmSync(gbrainHome3, { recursive: true, force: true });
+  });
+});
+
+describe("isPidAlive 与 readLockStatus 竞态兜底（M6）", () => {
+  test("isPidAlive：自身 pid 存活、已退出子进程 pid 已死", async () => {
+    expect(isPidAlive(process.pid)).toBe(true);
+    const dead = Bun.spawn(["cmd", "/c", "exit"], { stdout: "ignore", stderr: "ignore", stdin: "ignore", windowsHide: true });
+    await dead.exited;
+    expect(isPidAlive(dead.pid)).toBe(false);
+  });
+
+  test("readLockStatus：锁路径读取失败（ENOTDIR 代理竞态 ENOENT）按无锁处理不抛（I-1）", () => {
+    // 确定性构造读取失败：锁路径是文件而非目录（existsSync 为真、readdirSync 抛 ENOTDIR），
+    // 与 existsSync 之后目录被并发删除的竞态同走兜底分支
+    const dir = mkdtempSync(join(import.meta.dir, ".tmp", "sl-race-"));
+    try {
+      mkdirSync(join(dir, ".gbrain"), { recursive: true });
+      writeFileSync(join(dir, ".gbrain", "config.json"), "{}"); // database_path 缺省 → 锁解析到 brain.pglite/.gbrain-lock
+      mkdirSync(join(dir, ".gbrain", "brain.pglite"), { recursive: true });
+      writeFileSync(join(dir, ".gbrain", "brain.pglite", ".gbrain-lock"), "not-a-dir");
+      const s = readLockStatus(dir);
+      expect(s.present).toBe(false);
+    } finally { rmSync(dir, { recursive: true, force: true }); }
   });
 });

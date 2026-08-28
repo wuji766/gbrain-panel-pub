@@ -9,7 +9,7 @@ import { join } from "node:path";
 import type { PanelConfig } from "./config";
 import type { Orchestrator } from "./orchestrator";
 import type { GbrainClient } from "./gbrain-client";
-import { readLockPid, readLockStatus } from "./stale-lock";
+import { isPidAlive, readLockPid, readLockStatus } from "./stale-lock";
 
 export interface BackupInfo { name: string; sizeBytes: number; createdAt: string }
 
@@ -75,21 +75,28 @@ export class BackupManager {
     }
     this.running = true;
     try {
-      const killedPid = await this.deps.orch.killServe();
+      await this.deps.orch.killServe();
       // Windows 句柄释放竞态：killServe 后文件句柄可能尚未释放，立即复制易撞 EBUSY/EPERM
       await new Promise(r => setTimeout(r, 300));
+      // 活锁判据：持锁进程存活探测（2026-08-29 M5 验收 P0 修正）。旧判据 lockPid === killedPid
+      // 在 gbrain 经 bun shim 安装的机器上必不成立：面板 spawn 的直接子进程是 gbrain.exe（shim），
+      // 它再拉起孙进程 bun cli.ts serve，真正持锁/写锁 pid 的是孙进程，等值永假 → own 态备份必中止。
+      // 新判据以进程存活为唯一事实源（穿透任意进程拓扑）：锁 pid 已死（含被 taskkill /T 杀掉的
+      // 孙进程尸锁）→ 无写者，放行；锁 pid 仍活 → 外部 serve 抢占，中止。mtime 仅在 pid 读不出
+      // （schema 漂移）时兜底。PID 复用窗口内的假活会导致保守中止（方向安全，留痕）。
       const lock = readLockStatus(this.deps.cfg.gbrainHome);
-      if (lock.present && !lock.stale) {
+      if (lock.present) {
         const lockPid = readLockPid(this.deps.cfg.gbrainHome);
-        if (lockPid !== null && killedPid !== null && lockPid === killedPid) {
-          // 自有 serve 的尸锁：taskkill /F 强杀不清锁文件（gbrain 只在优雅退出路径清锁），
-          // mtime 冻结在死前最后一次心跳（30s 一次），90s staleness 窗口内必"新鲜"——mtime 判据
-          // 对自身尸锁必然误报。此 PID 为面板亲手所杀（ESRCH 死亡确凿），放行复制；
-          // 锁目录已被 filter 排除出备份产物，不会带入"恢复后判活锁"问题。
-        } else {
-          // 新鲜心跳且非自己杀掉的 PID——外部 serve 抢占持锁，复制会得到不一致快照
-          await this.deps.orch.start().catch(() => null); // best-effort 拉回（大概率 attached）
-          throw new Error("检测到活跃锁——疑似外部 serve 已抢占，已中止复制（源数据未被修改）");
+        if (lockPid !== null) {
+          if (isPidAlive(lockPid)) {
+            await this.deps.orch.start().catch(() => null); // best-effort 拉回（大概率 attached）
+            throw new Error(`检测到活跃锁——持锁进程 ${lockPid} 仍在运行（疑似外部 serve 已抢占），已中止复制（源数据未被修改）`);
+          }
+          // 锁 pid 已死：自家或他家的尸锁均无写者，放行复制；锁目录已被 filter 排除出备份产物
+        } else if (!lock.stale) {
+          // 锁 schema 漂移（pid 读不出）且 mtime 新鲜——保守中止，方向安全
+          await this.deps.orch.start().catch(() => null);
+          throw new Error("检测到新鲜锁但无法读取持锁 PID（锁 schema 漂移？），保守中止复制（源数据未被修改）");
         }
       }
       const ts = new Date().toISOString().slice(0, 19).replace(/[-:T]/g, "").replace(/^(\d{8})(\d{6})$/, "$1-$2");

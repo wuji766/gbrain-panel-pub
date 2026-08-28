@@ -145,7 +145,7 @@ export class Orchestrator {
   }
 
   /** 停止自有 serve。返回被杀子进程的 pid（attached/foreign 无自有进程、或子进程已自行退出时返回 null），
-   *  供备份活锁判据比对锁内 PID（自有尸锁放行）使用；其余调用方忽略返回值即可。 */
+   *  返回值当前无内部消费方（备份活锁判据已改用持锁进程存活探测），保留供诊断与测试。 */
   async killServe(): Promise<number | null> {
     if (!this.proc) { this.setState("stopped"); return null; } // attached/foreign：绝不杀别人的进程
     // 死 PID 守卫：子进程已自行退出（exitCode 非 null，或被信号杀死时 exitCode 保持 null 而

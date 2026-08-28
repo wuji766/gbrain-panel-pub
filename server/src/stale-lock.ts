@@ -37,13 +37,30 @@ export function readLockPid(gbrainHome: string): number | null {
   } catch { return null; }
 }
 
+/** PID 存活探测：signal 0 不实际发信号。进程不存在抛 ESRCH；类 Unix 下无权限抛 EPERM
+ *  （= 存活）。Bun 1.3.x Windows 实测：自身 pid → true，不存在的 pid → ESRCH。 */
+export function isPidAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (e) {
+    return (e as { code?: string }).code === "EPERM";
+  }
+}
+
 export function readLockStatus(gbrainHome: string, now = Date.now()): LockStatus {
   const lockDir = resolveLockDir(gbrainHome);
   if (!existsSync(lockDir)) return { present: false, stale: false, lockDir };
   let newest = 0;
-  for (const f of readdirSync(lockDir)) {
-    const st = statSync(join(lockDir, f));
-    newest = Math.max(newest, st.mtimeMs);
+  try {
+    for (const f of readdirSync(lockDir)) {
+      const st = statSync(join(lockDir, f));
+      newest = Math.max(newest, st.mtimeMs);
+    }
+  } catch {
+    // existsSync 与 readdir/stat 之间锁目录（或其中文件）被并发删除——按无锁处理：
+    // 无持锁者即无写者，调用方（备份活锁检查）放行方向安全，且不裸抛绕过恢复分支
+    return { present: false, stale: false, lockDir };
   }
   return { present: true, stale: now - newest > STALE_AFTER_MS, lockDir };
 }
