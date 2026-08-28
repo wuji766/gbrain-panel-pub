@@ -58,4 +58,21 @@ describe("BackupManager", () => {
     expect(bm.remove("..\\evil")).toBe(false);
     expect(bm.remove("no-such")).toBe(false);
   });
+
+  test("cpSync 失败：best-effort 重启 serve 并抛错", async () => {
+    let started = 0;
+    const orch = { getState: () => "own", killServe: async () => {}, start: async () => { started++; return "own"; } } as unknown as Orchestrator;
+    const bm = new BackupManager({ cfg: { ...cfg(), gbrainHome: join(TMP, "no-such-home") }, orch, client: fakeClient });
+    await expect(bm.run()).rejects.toThrow(/备份复制失败.*已尝试重启/);
+    expect(started).toBeGreaterThanOrEqual(1);
+  });
+
+  test("stopped 态：前置先拉起 serve 再备份", async () => {
+    let started = 0;
+    const orch = { getState: () => (started === 0 ? "stopped" : "own"), killServe: async () => { started = 0; }, start: async () => { started++; return "own"; } } as unknown as Orchestrator;
+    const bm = new BackupManager({ cfg: cfg(), orch, client: fakeClient });
+    const r = await bm.run();
+    expect(r.name).toMatch(/^gbrain-backup-/);
+    expect(started).toBeGreaterThanOrEqual(1);
+  });
 });
