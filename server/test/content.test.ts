@@ -151,3 +151,14 @@ describe("M3 server 加固", () => {
     expect(json.versions.length).toBe(2);
   });
 });
+
+describe("回收站差集补齐", () => {
+  test("include_deleted=true 只对已删行发 get_page（fake 记数）", async () => {
+    const b = await boot();
+    await fetch(`http://127.0.0.1:${b.panelPort}/api/pages?include_deleted=true&limit=50`);
+    // fake 的 /__calls 计数端点（bootPanelWithFake 直连 fake 子进程，计数自 fake 启动累计）
+    const counters = await (await fetch(`http://127.0.0.1:${b.fake.port}/__calls`)).json() as Record<string, number>;
+    expect(counters.list_pages).toBe(2);                    // 存活集 + 全集
+    expect(counters.get_page ?? 0).toBeLessThanOrEqual(2);  // 仅已删行（种子 1 条 + 容差）
+  });
+});

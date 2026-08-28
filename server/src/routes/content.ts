@@ -16,17 +16,7 @@ function normRows(res: unknown): Record<string, unknown>[] {
   return [];
 }
 
-// 真实 list_pages 行不含 deleted_at（仅 get_page 有），回收站视图需逐行补齐
-async function enrichDeletedAt(client: GbrainClient, rows: Record<string, unknown>[]): Promise<void> {
-  await Promise.all(rows.map(async r => {
-    const slug = typeof r.slug === "string" ? r.slug : "";
-    if (!slug || r.deleted_at) return;
-    try {
-      const d = await client.mcpCall<{ page?: { deleted_at?: string | null } }>("get_page", { slug, include_deleted: true });
-      if (d?.page) r.deleted_at = d.page.deleted_at ?? null;
-    } catch { /* 单行补齐失败不阻塞整个列表 */ }
-  }));
-}
+// 真实 list_pages 行不含 deleted_at（仅 get_page 有），回收站差集补齐见 /pages 路由内联实现（M4-3）
 
 // limit/offset NaN 守卫：非有限数或负数回默认，杜绝 ?limit=abc 产生 NaN 下传
 // （JSON.stringify 会把 NaN 变 null 掩盖问题，真实 gbrain 对非法分页参数未必兜底）
@@ -45,6 +35,33 @@ export function contentRoutes(client: GbrainClient) {
     const includeDeleted = c.req.query("include_deleted") === "true";
     const typeParam = c.req.query("type");
     try {
+      // 回收站差集补齐（M4-3，消除 N+1）：真实 list_pages 行无 deleted_at（仅 get_page 有），
+      // 旧实现对全集每行发 get_page（次数=行数）。改为两次 list 差集：存活集（offset:0 保证
+      // 差集基准完整）与全集并行取回，全集减存活集 = 已删行，仅对已删行逐个 get_page 补
+      // deleted_at（已删行通常少量；get_page 失败置 null 不阻塞）。include_deleted=false 与 ?q= 路径零改动。
+      if (!q && includeDeleted) {
+        const filters: Record<string, unknown> = {};
+        for (const k of ["type", "tag", "sort", "updated_after"] as const) {
+          const v = c.req.query(k);
+          if (v) filters[k] = v;
+        }
+        const [aliveRes, allRes] = await Promise.all([
+          client.mcpCall("list_pages", { limit, offset: 0, include_deleted: false, ...filters }),
+          client.mcpCall("list_pages", { limit, offset, include_deleted: true, ...filters }),
+        ]);
+        const aliveSlugs = new Set(normRows(aliveRes).map(r => String(r.slug ?? "")));
+        const allRows = normRows(allRes);
+        const deleted = allRows.filter(r => !aliveSlugs.has(String(r.slug ?? "")));
+        await Promise.all(deleted.map(async r => {
+          const slug = typeof r.slug === "string" ? r.slug : "";
+          if (!slug) return;
+          try {
+            const d = await client.mcpCall<{ page?: { deleted_at?: string | null } }>("get_page", { slug, include_deleted: true });
+            if (d?.page) r.deleted_at = d.page.deleted_at ?? null;
+          } catch { r.deleted_at = r.deleted_at ?? null; }
+        }));
+        return c.json({ pages: allRows, total: allRows.length });
+      }
       let res: unknown;
       if (q) {
         // q + type 组合：search 无 type 单数参数，type 映射进 types 数组（M3-2 加固）
@@ -58,7 +75,6 @@ export function contentRoutes(client: GbrainClient) {
         res = await client.mcpCall("list_pages", args);
       }
       const rows = normRows(res);
-      if (!q && includeDeleted) await enrichDeletedAt(client, rows);
       return c.json({ pages: rows, total: (res as { total?: number })?.total ?? rows.length });
     } catch (e) { return c.json({ error: String(e) }, 502); }
   });

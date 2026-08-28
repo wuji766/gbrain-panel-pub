@@ -11,6 +11,8 @@ interface FakeFact { factId: string; entity: string; fact: string; kind: string;
 const pages = new Map<string, FakePage>();
 const facts = new Map<string, FakeFact>();
 const links = [{ from: "notes/seed-1", to: "people/alice", type: "note" }, { from: "people/alice", to: "notes/seed-2", type: "note" }];
+// op 计数（键=MCP op 名）+ admin 路径计数（键=`METHOD path`），仅测试断言用，经 GET /__calls 读取
+const opCounts: Record<string, number> = {};
 let factSeq = 100;
 function seed(): void {
   pages.set("notes/seed-1", { slug: "notes/seed-1", title: "种子页一", type: "note", content: "# 种子页一\n\n内容", deletedAt: null, updatedAt: "2026-08-20T00:00:00Z" });
@@ -40,6 +42,11 @@ if (mode === "hang") {
     port, hostname: "127.0.0.1",
     async fetch(req) {
       const url = new URL(req.url);
+      if (url.pathname.startsWith("/admin/")) {
+        const k = `${req.method} ${url.pathname}`;
+        opCounts[k] = (opCounts[k] ?? 0) + 1;
+      }
+      if (url.pathname === "/__calls") return Response.json(opCounts);
       if (url.pathname === "/health") {
         await new Promise(r => setTimeout(r, delay));
         return Response.json({ ok: true });
@@ -64,6 +71,7 @@ if (mode === "hang") {
       if (url.pathname === "/mcp" && req.method === "POST") {
         const body = await req.json();
         const name = body?.params?.name as string;
+        if (name) opCounts[name] = (opCounts[name] ?? 0) + 1;
         const a = (body?.params?.arguments ?? {}) as Record<string, any>;
         const ok = (data: unknown) => Response.json({ jsonrpc: "2.0", id: body.id, result: { content: [{ type: "text", text: JSON.stringify(data) }] } });
         const fail = (msg: string) => Response.json({ jsonrpc: "2.0", id: body.id, result: { content: [{ type: "text", text: JSON.stringify({ error: msg }) }], isError: true } });
