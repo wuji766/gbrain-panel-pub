@@ -104,17 +104,34 @@ bun test
 6. 配置页 token 显示为 <已隐藏>；版本比较正确（可对比 gbrain --version）。
 7. 构建新前端后直接刷新浏览器（不硬刷新）应加载新版本（no-cache 生效）。
 
-## M5 验收清单（手动，需先 build:web 并启动面板）
+## M5 使用说明（备份修复与打磨）
 
-M5-3 行为改动（备份轮询降载 + online 容忍 + SSE 原生重连）手验点：
+- **备份修复（P0）**：复制排除运行时工件（resolve sock / lock 簇 / postmaster.pid——恢复安全），
+  失败自动清理残缺目录，复制前活锁检查（外部 serve 抢占时中止且源数据不动）。
+- 备份状态并入 /api/status 轮询（消除备份列表高频磁盘扫描）；备份阻塞期间不再误报"面板不可达"。
+- 请求日志 SSE 断开后自动重连；Agents 签发成功后按钮禁用防连点；仪表盘统计卡附口径说明
+  （active_api_keys 含 gbrain bootstrap-harness 同名历史累积，可在 Agents 页按名撤销清理）。
 
-1. **status 合并 backupRunning**：面板打开后，DevTools Network 里 `/api/status` 响应含
-   `backupRunning` 字段；每 5s 的全局轮询**不再**请求 `/api/backups`（备份列表仅在打开备份页时拉取）。
-2. **备份期 online 不闪断**：点「立即备份」→ 顶部横幅出现；备份期间（serve 停止/阻塞，status 可能
-   短暂拉取失败）顶栏连接状态保持在线，不闪红；备份完成后横幅消失。
-3. **SSE 原生重连**：请求日志页点「实时流」→ 正常收事件；重启面板后端（Ctrl+C 再启动）→ 出现一次
+### M5 验收清单（手动，需先 build:web 并启动面板）
+
+1. **备份红线**：own 态点立即备份 → 完成后到 `D:\gbrain-backup\<名称>\brain.pglite\` 核对
+   真实数据库文件（PG_VERSION、base/ 等）与体积（约 40+ MB）——列表有条目不算数。
+   备份产物中不得出现 .gbrain-resolve.sock / .gbrain-lock / postmaster.pid。
+2. **status 合并 backupRunning（DevTools Network 验证）**：面板打开后，DevTools Network 里
+   `/api/status` 响应含 `backupRunning` 字段；每 5s 的全局轮询**不再**请求 `/api/backups`
+   （备份列表仅在打开备份页时拉取）。
+3. **备份期 online 不闪断**：点「立即备份」→ 顶部横幅出现；备份期间（serve 停止/阻塞，status 可能
+   短暂拉取失败）顶栏连接状态保持在线，不闪红、不闪"面板服务不可达"；备份完成后横幅消失、
+   serve 恢复（页面库可查）。
+4. **attach 模式备份拒绝（M4 遗留补测）**：先手动起一个占 3131 的 serve → 启动面板（attach 态）
+   → 备份页点立即备份 → 预期 503 + "复用他人 serve"提示 → 测完关外部 serve 重启面板回 own。
+5. 配置页 backupRetention 显示 ≥1（手改 config.json 为 0 重启面板验证回 1）。
+6. **SSE 原生重连**：请求日志页点「实时流」→ 正常收事件；重启面板后端（Ctrl+C 再启动）→ 出现一次
    「连接中断，自动重连中…」提示，按钮保持「实时中」；后端起来后**不做任何操作**，新事件自动恢复
    插入列表头部（EventSource 原生重连）；点按钮手动停止仍立即断开。
+7. 仪表盘统计卡显示中文口径标签与说明行。
+8. Agents 页撤销遗留的 panel-m3-seed ×2、gbrain-panel-discover ×3（顺手复验撤销链路；
+   撤后 active_api_keys 相应下降）。
 
 ## 里程碑
 
