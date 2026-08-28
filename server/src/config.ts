@@ -45,9 +45,13 @@ export function loadConfig(path: string): PanelConfig {
   }
   const parsed = JSON.parse(readFileSync(path, "utf8")) as Partial<PanelConfig>;
   const cfg = { ...DEFAULTS, ...parsed } as PanelConfig;
-  // retention 下限：0/非数经 || 回默认 5，负数 floor 后仍 <1 则钳到 1（0/负份数会让保留策略永不删除或行为未定义）。
-  // 放在 saveConfig 之前，缺 token 回写时落盘的也是钳后的合法值。
-  cfg.backupRetention = Math.max(1, Math.floor(Number(cfg.backupRetention) || 5));
+  // retention 口径（2026-08-29 M5 验收条 5 裁定）：数值合法（含 0/负）→ 钳到 ≥1；非数/缺省
+  // （undefined/NaN/字符串等）→ 默认 5。旧实现 Number(x) || 5 把 0 也当缺省回 5，与文档
+  // 「0 → 1」不符。放在 saveConfig 之前，缺 token 回写时落盘的也是归一后的合法值。
+  const rawRetention = (parsed as { backupRetention?: unknown }).backupRetention;
+  cfg.backupRetention = typeof rawRetention === "number" && Number.isFinite(rawRetention)
+    ? Math.max(1, Math.floor(rawRetention))
+    : DEFAULTS.backupRetention;
   if (!parsed.bootstrapToken) { cfg.bootstrapToken = generateToken(); saveConfig(path, cfg); }
   return cfg;
 }

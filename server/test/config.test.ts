@@ -45,6 +45,22 @@ describe("backupRetention 下限", () => {
   });
 });
 
+describe("backupRetention 口径：0/负→1（钳制），非数/缺省→5（默认），小数→floor（M6）", () => {
+  const loadWith = (raw: unknown): number => {
+    const dir = mkdtempSync(join(import.meta.dir, ".tmp", "cfg-ret-"));
+    try {
+      const p = join(dir, "config.json");
+      writeFileSync(p, JSON.stringify({ bootstrapToken: "t", ...(raw === undefined ? {} : { backupRetention: raw }) }));
+      return loadConfig(p).backupRetention;
+    } finally { rmSync(dir, { recursive: true, force: true }); }
+  };
+  test("0 → 1（钳制，不是回退默认）", () => expect(loadWith(0)).toBe(1));
+  test("-3 → 1", () => expect(loadWith(-3)).toBe(1));
+  test("2.9 → 2（floor）", () => expect(loadWith(2.9)).toBe(2));
+  test("缺省 → 5（默认）", () => expect(loadWith(undefined)).toBe(5));
+  test("非数 → 5（默认）", () => expect(loadWith("abc")).toBe(5));
+});
+
 function writeManual(p: string, obj: unknown) {
   const { writeFileSync } = require("node:fs");
   writeFileSync(p, JSON.stringify(obj));

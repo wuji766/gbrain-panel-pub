@@ -142,10 +142,13 @@ export class BackupManager {
 
   private prune(): void {
     const dirs = readdirSync(this.deps.cfg.backupDir).filter(d => NAME_RE.test(d)).sort(); // 时间戳字典序 = 时间序
+    const failed: string[] = [];
     while (dirs.length > this.deps.cfg.backupRetention) {
       const oldest = dirs.shift()!;
-      rmSync(join(this.deps.cfg.backupDir, oldest), { recursive: true, force: true });
+      try { rmSync(join(this.deps.cfg.backupDir, oldest), { recursive: true, force: true }); }
+      catch { failed.push(oldest); } // 单份清理失败不阻断备份成功路径（M-2：错误信息友好化）
     }
+    if (failed.length) console.warn(`[backup] 旧备份清理失败（保留策略未完全执行）：${failed.join(", ")}`);
   }
 
   remove(name: string): boolean {

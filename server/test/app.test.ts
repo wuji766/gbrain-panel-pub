@@ -1,6 +1,11 @@
 // server/test/app.test.ts
 import { describe, test, expect, afterEach } from "bun:test";
 import { bootPanelWithFake } from "./helpers";
+import { createApp } from "../src/app";
+import type { PanelConfig } from "../src/config";
+import type { Orchestrator } from "../src/orchestrator";
+import type { GbrainClient } from "../src/gbrain-client";
+import type { BackupManager } from "../src/backup";
 
 const TOKEN = "test-token-0123456789abcdef0123456789";
 const panels: { stop: (b?: boolean) => void }[] = [];
@@ -88,4 +93,21 @@ describe("panel-config 掩蔽", () => {
     expect(JSON.stringify(json)).not.toContain(String(TOKEN));
     expect(json.gbrainPort).toBe(fake.port);
   }, 15000);
+});
+
+describe("/api/status backupRunning 直测（M-1）", () => {
+  const mkApp = (backup?: { isRunning(): boolean }) => {
+    const cfg = { panelPort: 0, gbrainPort: 0, backupDir: "unused" } as unknown as Parameters<typeof createApp>[0]["cfg"];
+    const orch = { getState: () => "own", getEffectivePort: () => 3131, getRecentLogs: () => [] } as unknown as Orchestrator;
+    const client = {} as GbrainClient;
+    return createApp({ cfg, orch, client, backup: backup as unknown as BackupManager | undefined });
+  };
+  test("注入 isRunning()=true 的 backup → backupRunning:true", async () => {
+    const res = await mkApp({ isRunning: () => true }).request("/api/status");
+    expect((await res.json() as Record<string, unknown>).backupRunning).toBe(true);
+  });
+  test("未注入 backup → backupRunning:false", async () => {
+    const res = await mkApp().request("/api/status");
+    expect((await res.json() as Record<string, unknown>).backupRunning).toBe(false);
+  });
 });

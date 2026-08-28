@@ -53,11 +53,11 @@ const agentColumns = [
   { title: "scope", key: "scope" },
   { title: "状态", key: "status", render: (a: Agent) => a.status ?? "" },
   { title: "请求数", key: "total_requests", render: (a: Agent) => `${a.total_requests ?? 0}（今日 ${a.requests_today ?? 0}）` },
-  { title: "最近使用", key: "last_used_at", render: (a: Agent) => (a.last_used_at ?? "从未").slice(0, 19).replace("T", " ") },
+  { title: "最近使用", key: "last_used_at", render: (a: Agent) => a.last_used_at ? new Date(a.last_used_at).toLocaleString() : "从未" },
 ];
 const keyColumns = [
   { title: "名称", key: "name" },
-  { title: "签发时间", key: "created_at", render: (k: KeyRow) => (k.created_at ?? "").slice(0, 19).replace("T", " ") },
+  { title: "签发时间", key: "created_at", render: (k: KeyRow) => k.created_at ? new Date(k.created_at).toLocaleString() : "" },
   { title: "状态", key: "status", render: (k: KeyRow) => k.status ?? "" },
   { title: "操作", key: "actions", render: (k: KeyRow) => (k.status === "active" && k.name ? hRevoke(k.name) : "") },
 ];
