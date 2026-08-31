@@ -12,12 +12,17 @@ const running = ref(false);
 
 async function load() {
   try { const j = await api<{ running: boolean; backups: BackupInfo[] }>("/backups"); running.value = j.running; backups.value = j.backups; }
-  catch (e) { message.error(String(e)); }
+  catch (e) {
+    message.error(String(e));
+    // 面板不可达时无从确认备份进行中——复位防「备份进行中」tag 永久滞留（M6 验收范围外观察④）；
+    // 备份真实进行中时（M7 起复制不阻塞事件循环）本请求可正常应答，不会走到这里
+    running.value = false;
+  }
 }
 
 async function runBackup() {
   running.value = true; // 请求期间先禁用按钮，结束后以 load() 的服务端状态为准
-  try { const r = await api<BackupInfo>("/backups", { method: "POST" }); message.success(`备份完成：${r.name}`); }
+  try { const r = await api<BackupInfo>("/backups", { method: "POST", signal: AbortSignal.timeout(120_000) }); message.success(`备份完成：${r.name}`); }
   catch (e) { message.error(String(e)); }
   finally { await load(); }
 }
