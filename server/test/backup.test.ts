@@ -60,7 +60,7 @@ describe("BackupManager", () => {
     expect(bm.remove("no-such")).toBe(false);
   });
 
-  test("cpSync 失败：best-effort 重启 serve 并抛错", async () => {
+  test("复制失败：best-effort 重启 serve 并抛错", async () => {
     let started = 0;
     const orch = { getState: () => "own", killServe: async () => {}, start: async () => { started++; return "own"; } } as unknown as Orchestrator;
     const bm = new BackupManager({ cfg: { ...cfg(), gbrainHome: join(TMP, "no-such-home") }, orch, client: fakeClient });

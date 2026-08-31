@@ -145,7 +145,7 @@ export class BackupManager {
       } catch (e) {
         // 残缺备份目录不留档：半份快照恢复出来是脏数据，且 sock 等工件未被排除时残件难删
         try { rmSync(dest, { recursive: true, force: true }); } catch { /* 清理失败不掩盖原错误 */ }
-        // best-effort 恢复 serve：cpSync 已抛错（磁盘满/EBUSY/ENOENT 等）时 serve 仍被杀着，
+        // best-effort 恢复 serve：复制已抛错（磁盘满/EBUSY/ENOENT 等）时 serve 仍被杀着，
         // 不重启则面板所有数据接口 502 直到面板进程重启为止
         let restart: string;
         try { restart = await this.deps.orch.start(); } catch { restart = "失败"; }

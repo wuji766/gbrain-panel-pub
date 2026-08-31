@@ -93,7 +93,7 @@ export function createApp(deps: { cfg: PanelConfig; orch: Orchestrator; client: 
   // 运维路由（requests/jobs/agents/api-keys 透传 + /api/events SSE 代理），仅需 client（无 cfg）
   app.route("/api", opsRoutes(client));
 
-  // 备份路由：列表带 running 字段供前端全局横幅轮询；name 走 BackupManager 白名单校验（防路径注入）
+  // 备份路由：列表带 running 字段供备份页复位 running 态（全局横幅走 /api/status 的 backupRunning）；name 走 BackupManager 白名单校验（防路径注入）
   app.get("/api/backups", c =>
     backup ? c.json({ running: backup.isRunning(), backups: backup.list() }) : c.json({ error: "备份未启用" }, 503));
   app.post("/api/backups", async c => {
@@ -105,7 +105,7 @@ export function createApp(deps: { cfg: PanelConfig; orch: Orchestrator; client: 
   app.delete("/api/backups/:name", c => {
     if (!backup) return c.json({ error: "备份未启用" }, 503);
     const ok = backup.remove(c.req.param("name"));
-    return ok ? c.json({ removed: true }) : c.json({ error: "删除失败（名称非法或不存在）" }, 400);
+    return ok ? c.json({ removed: true }) : c.json({ error: "删除失败（名称非法、不存在或被占用）" }, 400);
   });
 
   // 静态托管 web/dist（SPA 回退）；无 dist 时给出可读提示
