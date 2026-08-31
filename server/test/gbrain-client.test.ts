@@ -118,4 +118,24 @@ describe("GbrainClient", () => {
     const client = new GbrainClient(PORT, "tok");
     await expect(client.mcpCall("delete_page", { slug: "x" })).rejects.toThrow(/delete_page 工具级错误.*not found/);
   });
+
+  test("并发首次 mcpRequest 只签一把 key（single-flight，防同名 active 累积）", async () => {
+    // 语义对齐真实 fake/gbrain：revoke 清空同名 active，issue 追加一条 active
+    const active: string[] = [];
+    responder = (c) => {
+      if (c.url.endsWith("/admin/api/api-keys/revoke")) { active.length = 0; return { status: 200, json: { revoked: true } }; }
+      if (c.url.endsWith("/admin/api/api-keys")) { active.push(`k${active.length + 1}`); return { status: 200, json: { key: `k${active.length}` } }; }
+      if (c.url.endsWith("/mcp")) return { status: 200, json: { jsonrpc: "2.0", id: c.body.id, result: { tools: [] } } };
+      return { status: 204, cookie: "s" };
+    };
+    const client = new GbrainClient(PORT, "tok");
+    await Promise.all([
+      client.mcpRequest("tools/list"),
+      client.mcpRequest("tools/list"),
+      client.mcpRequest("tools/list"),
+    ]);
+    // 旧代码：3 个调用都在任何签发落地前看到 apiKey===null → 3 撤 3 签 → 3 条 active（M6 验收实证）
+    expect(active.length).toBe(1);
+    expect(calls.filter(c => c.url.endsWith("/admin/api/api-keys")).length).toBe(1);
+  });
 });

@@ -17,6 +17,9 @@ let rpcId = 0;
 export class GbrainClient {
   private cookie: string | null = null;
   private apiKey: string | null = null;
+  // key 签发 single-flight（M7）：并发首次调用共享同一 in-flight Promise，防止
+  // 多个 mcpRequest 同时看到 apiKey===null 各自「先撤后签」造成同名 active 累积
+  private keyInFlight: Promise<string> | null = null;
   // 端口支持 getter：fallback 换端口后 client 自动跟随（数字用法不变）
   private readonly portRef: number | (() => number);
 
@@ -92,7 +95,12 @@ export class GbrainClient {
     // 失败原因记入 issuanceError：匿名又遭 401/403 时附进错误消息，透出真正根因。
     let issuanceError: unknown = null;
     if (!this.apiKey) {
-      try { this.apiKey = await this.issueApiKey("gbrain-panel"); }
+      // single-flight：面板启动时多个数据接口并发首调，无去重会让「先撤后签」交错——
+      // 撤销全部落在任何签发落地之前，同秒产生 N 条同名 active key（M6 验收实证 3 条）
+      if (!this.keyInFlight) {
+        this.keyInFlight = this.issueApiKey("gbrain-panel").finally(() => { this.keyInFlight = null; });
+      }
+      try { this.apiKey = await this.keyInFlight; }
       catch (e) { issuanceError = e; this.apiKey = null; }
     }
     const res = await fetch(this.base() + "/mcp", {
