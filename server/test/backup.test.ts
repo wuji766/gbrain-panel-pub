@@ -43,7 +43,7 @@ describe("BackupManager", () => {
     // 伪早份数据
     for (const ts of ["20260101-000000", "20260102-000000", "20260103-000000"]) {
       mkdirSync(join(backupDir, `gbrain-backup-${ts}`), { recursive: true });
-      writeFileSync(join(backupDir, `gbrain-backup-${ts}`, "x"), "x");
+      writeFileSync(join(backupDir, `gbrain-backup-${ts}`, "BACKUP_OK"), new Date().toISOString());
     }
     const r = await bm.run(); // retention=2
     const dirs = readdirSync(backupDir).filter(d => d.startsWith("gbrain-backup-")).sort();
@@ -75,6 +75,45 @@ describe("BackupManager", () => {
     const r = await bm.run();
     expect(r.name).toMatch(/^gbrain-backup-/);
     expect(started).toBeGreaterThanOrEqual(1);
+  });
+});
+
+describe("备份完整性标记 BACKUP_OK（M7）", () => {
+  test("成功备份产物含 BACKUP_OK；无标记目录不出现在列表", async () => {
+    const bm = new BackupManager({ cfg: cfg(), orch: fakeOrch("own"), client: fakeClient });
+    const r = await bm.run();
+    expect(existsSync(join(backupDir, r.name, "BACKUP_OK"))).toBe(true);
+    // 构造后新增的无标记目录 = 升级后残缺品，列表不认（清理在下次构造时发生）
+    mkdirSync(join(backupDir, "gbrain-backup-20260101-000000"), { recursive: true });
+    writeFileSync(join(backupDir, "gbrain-backup-20260101-000000", "x"), "x");
+    const names = bm.list().map(b => b.name);
+    expect(names).toContain(r.name);
+    expect(names).not.toContain("gbrain-backup-20260101-000000");
+  });
+
+  test("升级收养：无哨兵时既有目录全部补标记（宁滥勿删）并写哨兵", () => {
+    // beforeEach 建的是全新空 backupDir，先手工造"升级前"现场：2 个无标记既有目录、无哨兵
+    for (const ts of ["20260101-000000", "20260102-000000"]) {
+      mkdirSync(join(backupDir, `gbrain-backup-${ts}`), { recursive: true });
+      writeFileSync(join(backupDir, `gbrain-backup-${ts}`, "data"), "d");
+    }
+    const bm = new BackupManager({ cfg: cfg(), orch: fakeOrch("own"), client: fakeClient });
+    expect(existsSync(join(backupDir, "gbrain-backup-20260101-000000", "BACKUP_OK"))).toBe(true);
+    expect(existsSync(join(backupDir, "gbrain-backup-20260102-000000", "BACKUP_OK"))).toBe(true);
+    expect(existsSync(join(backupDir, ".gbrain-panel-marker-v1"))).toBe(true);
+    expect(bm.list().length).toBe(2); // 收养后全部可见
+  });
+
+  test("残缺清理：有哨兵时构造即清理无标记目录，有标记的保留", () => {
+    writeFileSync(join(backupDir, ".gbrain-panel-marker-v1"), new Date().toISOString()); // 先写哨兵 = 已收养状态
+    mkdirSync(join(backupDir, "gbrain-backup-20260101-000000"), { recursive: true }); // 无标记 = 残缺
+    writeFileSync(join(backupDir, "gbrain-backup-20260101-000000", "half"), "h");
+    mkdirSync(join(backupDir, "gbrain-backup-20260102-000000"), { recursive: true }); // 有标记 = 完整
+    writeFileSync(join(backupDir, "gbrain-backup-20260102-000000", "BACKUP_OK"), new Date().toISOString());
+    const bm = new BackupManager({ cfg: cfg(), orch: fakeOrch("own"), client: fakeClient });
+    expect(existsSync(join(backupDir, "gbrain-backup-20260101-000000"))).toBe(false); // 残缺被清
+    expect(existsSync(join(backupDir, "gbrain-backup-20260102-000000"))).toBe(true);  // 完整保留
+    expect(bm.list().map(b => b.name)).toEqual(["gbrain-backup-20260102-000000"]);
   });
 });
 

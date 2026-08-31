@@ -4,7 +4,7 @@
 // 整目录复制 <gbrainHome>/.gbrain → 备份目录 → 重启 serve → 按保留策略清理旧份。
 // 失败防护：复制抛错时 best-effort 重启 serve 再上抛（否则面板数据接口 502 到重启进程为止）；
 // stopped 态（上次失败中断的遗留态）重试时先拉起 serve；attached/foreign 仍拒绝。
-import { cpSync, existsSync, mkdirSync, readdirSync, rmSync, statSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { PanelConfig } from "./config";
 import type { Orchestrator } from "./orchestrator";
@@ -26,6 +26,13 @@ export function isRuntimeArtifact(src: string): boolean {
 // 目录名固定 gbrain-backup-YYYYMMDD-HHMMSS（UTC），remove/列表均按此白名单校验，防路径注入
 const NAME_RE = /^gbrain-backup-\d{8}-\d{6}$/;
 
+// 完整性标记（M7）：复制完成后写 BACKUP_OK（单次小文件写入，存在即完整）；列表与 retention
+// 只认标记。升级收养哨兵写在 backupDir 根：无哨兵 = 升级前的既有目录（无标记语义，无从区分
+// 残缺）→ 一次性全部补标记收养（宁滥勿删，残缺的历史份靠 retention 轮替消化）；有哨兵 =
+// 升级后 → 无标记目录只能是复制中断的残缺品，构造时清理。
+const MARKER_FILE = "BACKUP_OK";
+const SCHEMA_SENTINEL = ".gbrain-panel-marker-v1";
+
 export class BackupManager {
   private running = false;
 
@@ -33,14 +40,41 @@ export class BackupManager {
   constructor(
     private deps: { cfg: PanelConfig; orch: Orchestrator; client: GbrainClient },
     private opts: { copyDir?: (src: string, dest: string) => void } = {},
-  ) {}
+  ) {
+    // 启动迁移：收养/清理只碰 backupDir 下 NAME_RE 匹配且（清理时）无标记的目录；
+    // 任何失败仅告警——备份目录异常不得阻断面板启动
+    try { this.ensureMarkerSchema(); } catch (e) { console.warn(`[backup] 标记体系迁移异常（忽略）：${String(e)}`); }
+  }
+
+  private ensureMarkerSchema(): void {
+    const dir = this.deps.cfg.backupDir;
+    if (!existsSync(dir)) return;
+    const sentinel = join(dir, SCHEMA_SENTINEL);
+    const dirs = readdirSync(dir).filter(d => NAME_RE.test(d));
+    if (!existsSync(sentinel)) {
+      let adopted = 0;
+      for (const d of dirs) {
+        const marker = join(dir, d, MARKER_FILE);
+        if (!existsSync(marker)) { writeFileSync(marker, new Date().toISOString()); adopted++; }
+      }
+      writeFileSync(sentinel, new Date().toISOString());
+      if (adopted > 0) console.log(`[backup] 完整性标记收养：${adopted} 个既有备份目录补写 ${MARKER_FILE}`);
+    } else {
+      for (const d of dirs) {
+        if (!existsSync(join(dir, d, MARKER_FILE))) {
+          try { rmSync(join(dir, d), { recursive: true, force: true }); console.warn(`[backup] 清理无 ${MARKER_FILE} 标记的残缺目录：${d}`); }
+          catch { /* 句柄占用等：下轮启动再试 */ }
+        }
+      }
+    }
+  }
 
   isRunning(): boolean { return this.running; }
 
   list(): BackupInfo[] {
     if (!existsSync(this.deps.cfg.backupDir)) return [];
     return readdirSync(this.deps.cfg.backupDir)
-      .filter(d => NAME_RE.test(d))
+      .filter(d => NAME_RE.test(d) && existsSync(join(this.deps.cfg.backupDir, d, MARKER_FILE)))
       .flatMap((d): BackupInfo[] => {
         const p = join(this.deps.cfg.backupDir, d);
         let size = 0;
@@ -105,6 +139,9 @@ export class BackupManager {
       try {
         mkdirSync(this.deps.cfg.backupDir, { recursive: true });
         await this.copyDataDir(join(this.deps.cfg.gbrainHome, ".gbrain"), dest);
+        // 复制完成后写完整性标记：强杀/断电后无标记即残缺（列表/retention 只认标记）；
+        // 写失败按备份失败处理（catch 清理残缺目录并 best-effort 重启 serve）
+        writeFileSync(join(dest, MARKER_FILE), new Date().toISOString());
       } catch (e) {
         // 残缺备份目录不留档：半份快照恢复出来是脏数据，且 sock 等工件未被排除时残件难删
         try { rmSync(dest, { recursive: true, force: true }); } catch { /* 清理失败不掩盖原错误 */ }
@@ -141,7 +178,9 @@ export class BackupManager {
   }
 
   private prune(): void {
-    const dirs = readdirSync(this.deps.cfg.backupDir).filter(d => NAME_RE.test(d)).sort(); // 时间戳字典序 = 时间序
+    const dirs = readdirSync(this.deps.cfg.backupDir)
+      .filter(d => NAME_RE.test(d) && existsSync(join(this.deps.cfg.backupDir, d, MARKER_FILE)))
+      .sort(); // 时间戳字典序 = 时间序
     const failed: string[] = [];
     while (dirs.length > this.deps.cfg.backupRetention) {
       const oldest = dirs.shift()!;
@@ -155,7 +194,7 @@ export class BackupManager {
     if (!NAME_RE.test(name)) return false; // 非白名单名（含路径注入变体）一律拒绝
     const p = join(this.deps.cfg.backupDir, name);
     if (!existsSync(p)) return false;
-    rmSync(p, { recursive: true, force: true });
-    return true;
+    try { rmSync(p, { recursive: true, force: true }); return true; }
+    catch (e) { console.warn(`[backup] 删除备份失败（${name}）：${String(e)}`); return false; }
   }
 }
