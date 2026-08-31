@@ -4,7 +4,7 @@
 // 整目录复制 <gbrainHome>/.gbrain → 备份目录 → 重启 serve → 按保留策略清理旧份。
 // 失败防护：复制抛错时 best-effort 重启 serve 再上抛（否则面板数据接口 502 到重启进程为止）；
 // stopped 态（上次失败中断的遗留态）重试时先拉起 serve；attached/foreign 仍拒绝。
-import { cpSync, existsSync, mkdirSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { PanelConfig } from "./config";
 import type { Orchestrator } from "./orchestrator";
@@ -162,18 +162,35 @@ export class BackupManager {
     }
   }
 
-  /** 复制数据目录：filter 排除运行时工件（sock/lock 簇/postmaster.pid）；
-   *  撞 EBUSY/EPERM（句柄竞态）时等 300ms 重试一次（仅一次），仍失败上抛进入 catch 恢复逻辑。
-   *  opts.copyDir 为整个复制动作的测试替身注入点（替换后不再有 filter/重试语义——注入用例自担）。 */
+  /** 复制数据目录（M7 异步分片版）：cpSync 整树复制会阻塞事件循环 5-10s（M6 验收实证：
+   *  期间 /api/status 完全无应答、请求排队），改为逐文件 copyFileSync + 每个条目后 setImmediate
+   *  让路——备份期间 status/前端轮询正常应答。filter 语义不变（isRuntimeArtifact 条目级排除，
+   *  目录级跳过含其全部内容）；EBUSY/EPERM 句柄竞态从整树重试改为单文件级重试一次（更精准）。
+   *  opts.copyDir 为整个复制动作的测试替身注入点（替换后无 filter/重试/让路语义——注入用例自担）。 */
   private async copyDataDir(src: string, dest: string): Promise<void> {
     if (this.opts.copyDir) { this.opts.copyDir(src, dest); return; }
-    try {
-      cpSync(src, dest, { recursive: true, filter: (src) => !isRuntimeArtifact(src) });
-    } catch (e) {
+    await this.copyTree(src, dest);
+  }
+
+  private async copyTree(srcDir: string, destDir: string): Promise<void> {
+    mkdirSync(destDir, { recursive: true });
+    for (const entry of readdirSync(srcDir, { withFileTypes: true })) {
+      const s = join(srcDir, entry.name);
+      if (isRuntimeArtifact(s)) continue; // 与旧 cpSync filter 同语义：条目级排除
+      const d = join(destDir, entry.name);
+      if (entry.isDirectory()) await this.copyTree(s, d);
+      else await this.copyOneFile(s, d);
+      await new Promise<void>(r => setImmediate(r)); // 事件循环让路：单文件粒度（大文件仍可能短暂阻塞，可接受）
+    }
+  }
+
+  private async copyOneFile(s: string, d: string): Promise<void> {
+    try { copyFileSync(s, d); }
+    catch (e) {
       const code = (e as { code?: string }).code;
       if (code !== "EBUSY" && code !== "EPERM") throw e;
       await new Promise(r => setTimeout(r, 300));
-      cpSync(src, dest, { recursive: true, filter: (src) => !isRuntimeArtifact(src) });
+      copyFileSync(s, d); // 仍失败上抛 → run() 的 catch 走残缺清理 + best-effort 重启
     }
   }
 

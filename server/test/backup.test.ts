@@ -1,5 +1,5 @@
 import { describe, test, expect, beforeEach, afterEach } from "bun:test";
-import { mkdtempSync, rmSync, mkdirSync, writeFileSync, existsSync, readdirSync, utimesSync } from "node:fs";
+import { mkdtempSync, rmSync, mkdirSync, writeFileSync, existsSync, readdirSync, utimesSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { BackupManager } from "../src/backup";
 import type { Orchestrator } from "../src/orchestrator";
@@ -114,6 +114,19 @@ describe("备份完整性标记 BACKUP_OK（M7）", () => {
     expect(existsSync(join(backupDir, "gbrain-backup-20260101-000000"))).toBe(false); // 残缺被清
     expect(existsSync(join(backupDir, "gbrain-backup-20260102-000000"))).toBe(true);  // 完整保留
     expect(bm.list().map(b => b.name)).toEqual(["gbrain-backup-20260102-000000"]);
+  });
+});
+
+describe("分片复制（M7 异步化）", () => {
+  test("嵌套多文件递归复制，内容逐字节一致", async () => {
+    mkdirSync(join(home, ".gbrain", "sub", "deep"), { recursive: true });
+    writeFileSync(join(home, ".gbrain", "sub", "a.txt"), "A");
+    writeFileSync(join(home, ".gbrain", "sub", "deep", "b.bin"), Buffer.from([1, 2, 3]));
+    const bm = new BackupManager({ cfg: cfg(), orch: fakeOrch("own"), client: fakeClient });
+    const r = await bm.run();
+    const dest = join(backupDir, r.name);
+    expect(readFileSync(join(dest, "sub", "a.txt"), "utf8")).toBe("A");
+    expect(Array.from(readFileSync(join(dest, "sub", "deep", "b.bin")))).toEqual([1, 2, 3]);
   });
 });
 
